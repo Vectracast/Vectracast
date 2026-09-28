@@ -569,7 +569,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             if !isDetail && command.presentation != nil { enterDetail(info, command, query: query); return }
             let preferencesAction = ResultAction(id: "settings", title: "配置扩展", type: "settings.open", text: info.manifest.id)
             if query.isEmpty && command.acceptsEmptyQuery != true {
-                setResults([.message("输入要查询的内容", "直接在命令后继续输入，无需按回车进入扩展。", icon: info.manifest.icon, actions: [preferencesAction])], section: info.manifest.name)
+                let prefix = entry != nil ? trimmed : (prefs.keywords(info, command).first ?? command.id)
+                let continueInput = ResultAction(id: "query", title: "输入内容", type: "input.set", text: isDetail ? "" : prefix + " ")
+                setResults([.message("输入要查询的内容", "按回车继续输入，或直接在命令后输入内容。", icon: info.manifest.icon, actions: [continueInput, preferencesAction])], section: info.manifest.name)
                 return
             }
             guard query.count <= 6000 else { setResults([.message("输入内容过长", "请缩短到 6000 个字符以内。")], section: info.manifest.name); return }
