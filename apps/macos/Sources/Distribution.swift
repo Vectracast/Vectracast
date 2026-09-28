@@ -33,8 +33,8 @@ struct PublicRepository: Equatable {
     }
 }
 
-struct PublicRelease: Decodable {
-    struct Asset: Decodable { let name: String; let browser_download_url: String; let size: Int }
+struct PublicRelease: Codable {
+    struct Asset: Codable { let name: String; let browser_download_url: String; let size: Int }
     let tag_name: String
     let body: String?
     let draft: Bool
@@ -47,8 +47,8 @@ struct PublicRelease: Decodable {
     }
 }
 
-struct PluginIndex: Decodable {
-    struct Entry: Decodable {
+struct PluginIndex: Codable {
+    struct Entry: Codable {
         let manifest: ExtensionManifest
         let asset: String
         let sha256: String
@@ -149,5 +149,35 @@ enum DistributionSource {
         let release = try JSONDecoder().decode(PublicRelease.self, from: data)
         guard !release.draft, !release.prerelease else { throw LauncherError("没有可用的正式发行版。") }
         return release
+    }
+}
+
+
+/// Only validated catalog metadata is persisted; installation handles remain session-local.
+struct CatalogCache: Codable {
+    let repository: String
+    let fetchedAt: Date
+    let release: PublicRelease
+    let index: PluginIndex
+    func validate(for repository: PublicRepository, now: Date = Date()) throws {
+        let age = now.timeIntervalSince(fetchedAt)
+        guard self.repository == repository.name, age >= -60, age < 7 * 86400,
+              !release.draft, !release.prerelease else { throw LauncherError("目录缓存已过期。") }
+        try index.validate()
+        _ = try release.asset("index.json", repository: repository, limit: 2_000_000)
+        for entry in index.plugins { _ = try release.asset(entry.asset, repository: repository, limit: 3_000_000) }
+    }
+    static func read(_ url: URL, repository: PublicRepository) -> Self? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4_000_000,
+              let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(Self.self, from: data),
+              (try? value.validate(for: repository)) != nil else { return nil }
+        return value
+    }
+    func write(_ url: URL) throws {
+        try validate(for: PublicRepository(repository))
+        let data = try JSONEncoder().encode(self)
+        guard data.count <= 4_000_000 else { throw LauncherError("目录缓存过大。") }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 }

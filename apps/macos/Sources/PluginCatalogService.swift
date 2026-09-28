@@ -10,26 +10,64 @@ actor PluginCatalogService {
         let loaded: Date
     }
     private var snapshots: [String: Snapshot] = [:]
-    private var pending: [String: Task<Snapshot, Error>] = [:]
-    func invalidate() { snapshots.removeAll() }
+    private var pending: Task<Snapshot, Error>?
+    private var cached: CatalogCache?
+    private var forceRefresh = false
+    private var lastAttempt = Date.distantPast
+    private let cacheURL: URL
+    private let fetch: @Sendable (PublicRepository) async throws -> CatalogCache
+    init(cacheURL: URL? = nil, fetch: @escaping @Sendable (PublicRepository) async throws -> CatalogCache = { try await PluginCatalogService.fetchRemote($0) }) {
+        self.fetch = fetch
+        let base = ProcessInfo.processInfo.environment["LAUNCHER_HOME"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Vectracast")
+        self.cacheURL = cacheURL ?? base.appendingPathComponent("catalog/official-v1.json")
+    }
+    func invalidate() { forceRefresh = true }
+    private func snapshot(_ cache: CatalogCache, repository: PublicRepository) -> Snapshot {
+        if let existing = snapshots.values.first(where: { $0.release.tag_name == cache.release.tag_name && Date().timeIntervalSince($0.loaded) < 300 }) { return existing }
+        let result = Snapshot(repository: repository, release: cache.release, entries: cache.index.plugins.map { (UUID().uuidString, $0) }, loaded: Date())
+        // Preserve recently issued handles when a background refresh completes.
+        snapshots = snapshots.filter { Date().timeIntervalSince($0.value.loaded) < 600 }
+        if snapshots.count >= 8, let oldest = snapshots.min(by: { $0.value.loaded < $1.value.loaded })?.key { snapshots[oldest] = nil }
+        snapshots[UUID().uuidString] = result
+        return result
+    }
+    private func refresh(_ repository: PublicRepository) -> Task<Snapshot, Error> {
+        if let pending { return pending }
+        lastAttempt = Date()
+        let task = Task<Snapshot, Error> {
+            do {
+                let value = try await self.fetch(repository)
+                try value.validate(for: repository)
+                try? value.write(self.cacheURL)
+                self.cached = value; self.pending = nil
+                return self.snapshot(value, repository: repository)
+            } catch { self.pending = nil; throw error }
+        }
+        pending = task
+        return task
+    }
+    private static func fetchRemote(_ repository: PublicRepository) async throws -> CatalogCache {
+        let release = try await DistributionSource.latest(repository)
+        let url = try release.asset("index.json", repository: repository, limit: 2_000_000)
+        let data = try await PublicDownload.data(from: url, limit: 2_000_000)
+        return CatalogCache(repository: repository.name, fetchedAt: Date(), release: release, index: try JSONDecoder().decode(PluginIndex.self, from: data))
+    }
     func load() async throws -> Snapshot {
         let repository = try PublicRepository(DistributionSource.pluginRepository)
-        if let snapshot = snapshots[repository.name], Date().timeIntervalSince(snapshot.loaded) < 300 { return snapshot }
-        if let task = pending[repository.name] { return try await task.value }
-        let task = Task<Snapshot, Error> {
-            let release = try await DistributionSource.latest(repository)
-            let url = try release.asset("index.json", repository: repository, limit: 2_000_000)
-            let data = try await PublicDownload.data(from: url, limit: 2_000_000)
-            let index = try JSONDecoder().decode(PluginIndex.self, from: data); try index.validate()
-            for entry in index.plugins { _ = try release.asset(entry.asset, repository: repository, limit: 3_000_000) }
-            return Snapshot(repository: repository, release: release, entries: index.plugins.map { (UUID().uuidString, $0) }, loaded: Date())
+        if cached == nil { cached = CatalogCache.read(cacheURL, repository: repository) }
+        if !forceRefresh, let cached, (try? cached.validate(for: repository)) != nil {
+            let value = snapshot(cached, repository: repository)
+            if Date().timeIntervalSince(cached.fetchedAt) >= 300, Date().timeIntervalSince(lastAttempt) >= 60, pending == nil {
+                let task = refresh(repository)
+                Task { if (try? await task.value) != nil {
+                    await MainActor.run { NotificationCenter.default.post(name: .init("VectracastCatalogUpdated"), object: nil) }
+                } }
+            }
+            return value
         }
-        pending[repository.name] = task
-        do {
-            let value = try await task.value; pending[repository.name] = nil
-            if snapshots.count >= 4, let key = snapshots.min(by: { $0.value.loaded < $1.value.loaded })?.key { snapshots[key] = nil }
-            snapshots[repository.name] = value; return value
-        } catch { pending[repository.name] = nil; throw error }
+        forceRefresh = false
+        return try await refresh(repository).value
     }
     func download(_ handle: String) async throws -> (Data, ExtensionPackage, String) {
         guard let snapshot = snapshots.values.first(where: { $0.entries.contains { $0.0 == handle } }),

@@ -106,6 +106,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     private var selectedFilter = ""
     private var isDetail: Bool { browserCommand != nil }
     private let pendingQuery = QueryDebouncer()
+    private let queryProgress = NSProgressIndicator()
+    private let loadingLabel = NSTextField(labelWithString: "正在加载插件内容…")
+    private var catalogObserver: NSObjectProtocol?
     private var resultsPending = false
     private var queryGeneration = UUID()
     private var previousApplication: NSRunningApplication?
@@ -185,6 +188,15 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         settingsButton = gear
         root.addSubview(gear)
         addLine(root, y: 60)
+        queryProgress.style = .bar; queryProgress.isIndeterminate = true; queryProgress.isHidden = true
+        queryProgress.frame = NSRect(x: 16, y: 61, width: 742, height: 6); root.addSubview(queryProgress)
+        loadingLabel.font = .systemFont(ofSize: 13); loadingLabel.textColor = .secondaryLabelColor
+        loadingLabel.alignment = .center; loadingLabel.frame = NSRect(x: 40, y: 150, width: 694, height: 24)
+        loadingLabel.isHidden = true; root.addSubview(loadingLabel)
+        catalogObserver = NotificationCenter.default.addObserver(forName: .init("VectracastCatalogUpdated"), object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.panel.isVisible, self.browserCommand?.0.manifest.permissions.catalog?.contains("read") == true else { return }
+            self.updateQuery(immediate: true)
+        }
         sectionLabel.frame = NSRect(x: 16, y: 76, width: 738, height: 20)
         sectionLabel.font = .systemFont(ofSize: 12, weight: .medium); sectionLabel.textColor = .secondaryLabelColor
         root.addSubview(sectionLabel)
@@ -198,7 +210,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         table.target = self; table.doubleAction = #selector(executeSelected)
         table.onReturn = { [weak self] in self?.executeSelected() }
         table.setAccessibilityLabel("查询结果")
-        scroll.documentView = table; root.addSubview(scroll)
+        scroll.documentView = table; root.addSubview(scroll); root.addSubview(loadingLabel)
         bottomBackground.wantsLayer = true; bottomBackground.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.09).cgColor; root.addSubview(bottomBackground)
         bottomLine = NSBox(); bottomLine.boxType = .separator; root.addSubview(bottomLine)
         logo = NSImageView(frame: NSRect(x: 16, y: 445, width: 19, height: 19))
@@ -273,6 +285,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
         if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) }
+        if let catalogObserver { NotificationCenter.default.removeObserver(catalogObserver) }
         refreshTimer?.invalidate()
     }
     func windowDidBecomeKey(_ notification: Notification) { focusSearch(); recordVisibility("focus") }
@@ -418,6 +431,8 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         backButton.isHidden = !isDetail; typeFilter.isHidden = pageItem != nil || !isDetail || (browserCommand?.1.filters?.isEmpty ?? true)
         detailView.isHidden = !isDetail || isList; detailDivider.isHidden = !isDetail || isList
         let searchHeight = ceil(search.cell?.cellSize.height ?? 26)
+        backButton.frame = NSRect(x: 20, y: 17, width: 26, height: 26)
+        typeFilter.frame = NSRect(x: 560, y: 13, width: 194, height: 34)
         search.frame.origin.y = (60 - searchHeight) / 2
         search.frame.size.height = searchHeight
         search.frame.origin.x = isDetail ? 52 : 16
@@ -431,7 +446,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             detailView.frame = NSRect(x: 297, y: 60, width: 477, height: height - 100)
         }
         if isList { scroll.frame = NSRect(x: 8, y: 68, width: 758, height: max(0, height - 116)) }
-        table.tableColumns[0].width = scroll.frame.width - 4
+        table.tableColumns[0].width = scroll.contentSize.width - 4
         bottomBackground.frame = NSRect(x: 0, y: height - 40, width: 774, height: 40)
         bottomLine.frame = NSRect(x: 0, y: height - 40, width: 774, height: 1)
         logo.frame.origin.y = height - 29; footer.frame.origin.y = height - 29
@@ -498,6 +513,11 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             setResults([.message("等待输入…", "停止输入后自动查询", icon: "ellipsis")], section: "结果")
         }
         resultsPending = true
+        if isDetail {
+            queryProgress.isHidden = false; queryProgress.startAnimation(nil)
+            loadingLabel.isHidden = !results.isEmpty
+            loadingLabel.stringValue = browserCommand?.0.manifest.permissions.catalog?.contains("read") == true ? "正在连接插件商店，首次加载可能需要片刻…" : "正在加载插件内容…"
+        }
         table.alphaValue = isDetail ? 1 : 0.5
         footer.stringValue = "等待输入 · 停顿后自动查询"
         updatePrimaryAction()
@@ -505,6 +525,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         layoutPanel()
     }
     private func setResults(_ items: [ResultItem], section: String) {
+        queryProgress.stopAnimation(nil); queryProgress.isHidden = true; loadingLabel.isHidden = true
         let id = results.indices.contains(table.selectedRow) ? results[table.selectedRow].id : nil
         resultsPending = true; table.alphaValue = 1; actionsButton.isEnabled = true
         var displayed: [ResultItem] = []; var previousGroup: String?
@@ -553,7 +574,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             }
             guard query.count <= 6000 else { setResults([.message("输入内容过长", "请缩短到 6000 个字符以内。")], section: info.manifest.name); return }
             beginWaiting()
-            footer.stringValue = info.manifest.permissions.network?.isEmpty == false ? "通过已授权的扩展服务查询" : "本地扩展 · 实时结果"
+            footer.stringValue = info.manifest.permissions.catalog?.contains("read") == true ? "正在刷新插件目录…" : (info.manifest.permissions.network?.isEmpty == false ? "通过已授权的扩展服务查询" : "本地扩展 · 实时结果")
             pendingQuery.schedule(requestedDelayMs: command.debounceMs, immediate: immediate || (isDetail && trimmed.isEmpty)) { [weak self] in
                 guard let self, self.queryGeneration == generation, self.search.stringValue == raw else { return }
                 self.runtime.query(info, command: command.id, query: query, rawInput: raw, filter: self.selectedFilter) { [weak self] result in
@@ -613,7 +634,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         title.font = .systemFont(ofSize: fontSize, weight: .regular); title.lineBreakMode = .byTruncatingTail
         if isList {
             let subtitle = NSTextField(labelWithString: item.subtitle ?? ""); subtitle.font = .systemFont(ofSize: fontSize - 1); subtitle.textColor = .secondaryLabelColor; subtitle.lineBreakMode = .byTruncatingTail
-            image.frame = NSRect(x: 10, y: 13, width: 26, height: 28); image.translatesAutoresizingMaskIntoConstraints = true
+            image.frame = NSRect(x: 10, y: 18, width: 26, height: 26); image.translatesAutoresizingMaskIntoConstraints = true
             title.frame = NSRect(x: 48, y: 31, width: tableView.bounds.width - 72, height: 22)
             subtitle.frame = NSRect(x: 48, y: 8, width: tableView.bounds.width - 72, height: 21)
             view.addSubview(image); view.addSubview(title); view.addSubview(subtitle)
