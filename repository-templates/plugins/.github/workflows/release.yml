@@ -1,5 +1,6 @@
 name: Release plugin catalog
 on:
+  workflow_dispatch:
   push:
     tags: ["plugins-v*"]
 permissions:
@@ -45,6 +46,7 @@ jobs:
       - name: Pack all reviewed plugins
         run: node .tooling/scripts/build-plugin-release.mjs . release previous-index.json
       - name: Publish catalog and installable packages together
+        if: startsWith(github.ref, 'refs/tags/plugins-v')
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

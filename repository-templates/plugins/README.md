@@ -16,6 +16,8 @@ Vectracast 的公开插件仓库。每个一级目录是一个插件，包含 `e
 
 此仓库的 Release 是完整插件目录快照。增加新插件后用户刷新目录即可发现，不需要重新发布宿主应用。
 
+在 Actions 页面手动运行 `Release plugin catalog` 可检查打包和版本一致性，不创建 Release；只有推送 `plugins-v*` 标签才会发布。
+
 ## 协议
 
 仓库使用 MIT License。第三方依赖仍遵循各自协议。
