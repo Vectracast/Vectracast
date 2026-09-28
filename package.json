@@ -1,0 +1,26 @@
+{
+  "name": "vectracast",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Cast vectors, summon anything. A native macOS launcher and plugin platform.",
+  "author": "jason",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node packages/cli/bin/platform.mjs dev",
+    "build": "npm run app:build",
+    "check": "tsc --noEmit",
+    "test": "npm run test:platform",
+    "format": "prettier --write \"packages/**/*.{ts,mjs,json}\" \"extensions/*/src/**/*.ts\" \"extensions/*/extension.json\" \"tests/platform/*.mjs\" package.json tsconfig.json tsconfig.platform.json",
+    "app:build": "bash scripts/build-app.sh",
+    "platform": "node packages/cli/bin/platform.mjs",
+    "check:platform": "tsc --noEmit -p tsconfig.platform.json",
+    "test:platform": "node --test tests/platform/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10",
+    "esbuild": "^0.25.12",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0"
+  },
+  "buildNumber": 17
+}

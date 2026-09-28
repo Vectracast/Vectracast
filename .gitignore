@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env*
+build/
+**/dist/
+.developer-test/
+# Keep historical design/reference captures local; publish current product demos.
+docs/design/*
+!docs/design/vectracast-*
+!docs/design/overview-notes.md

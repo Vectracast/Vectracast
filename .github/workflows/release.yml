@@ -1,0 +1,46 @@
+name: Release Vectracast
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VECTRACAST_APP_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Validate release tag and notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$(uname -m)" = arm64
+          node -e 'const p=require("./package.json");if(process.env.RELEASE_TAG!==`v${p.version}`)throw Error("Tag and version differ")'
+          test -s RELEASE_NOTES.md
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Test the signed bundle
+        run: node --test --test-concurrency=1 tests/platform/*.test.mjs
+      - run: node scripts/package-app-release.mjs
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft --title "Vectracast $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest

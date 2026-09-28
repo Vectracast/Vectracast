@@ -1,0 +1,53 @@
+name: Release plugin catalog
+on:
+  push:
+    tags: ["plugins-v*"]
+permissions:
+  contents: read
+concurrency:
+  group: plugin-catalog-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Validate toolchain configuration
+        env:
+          HOST_REPOSITORY: ${{ vars.VECTRACAST_REPOSITORY }}
+          HOST_REF: ${{ vars.VECTRACAST_REF }}
+        run: |
+          test -n "$HOST_REPOSITORY"
+          test -n "$HOST_REF"
+          test -s RELEASE_NOTES.md
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ vars.VECTRACAST_REPOSITORY }}
+          ref: ${{ vars.VECTRACAST_REF }}
+          path: .tooling
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: .tooling/package-lock.json
+      - run: npm ci --prefix .tooling
+      - name: Fetch previous catalog for immutable version checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .tooling/scripts/fetch-previous-index.mjs previous-index.json
+      - name: Pack all reviewed plugins
+        run: node .tooling/scripts/build-plugin-release.mjs . release previous-index.json
+      - name: Publish catalog and installable packages together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* --verify-tag --draft --title "$RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest
