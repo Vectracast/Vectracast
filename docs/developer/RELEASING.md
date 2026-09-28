@@ -83,7 +83,7 @@ git clone --recurse-submodules https://github.com/hi-jian/Vectracast.git
 | 所属仓库 | 变量 | 值 |
 | --- | --- | --- |
 | 插件仓库 | `VECTRACAST_REPOSITORY` | `hi-jian/Vectracast` |
-| 插件仓库 | `VECTRACAST_REF` | 宿主工具链的固定版本，例如 `v0.7.0`，或完整提交 SHA |
+| 插件仓库 | `VECTRACAST_REF` | 宿主工具链的固定版本，例如 `v0.7.1`，或完整提交 SHA |
 
 工作流使用 GitHub 提供的 `GITHUB_TOKEN`，不需要个人访问令牌。发布作业请求 `contents: write`；若组织策略限制 Actions，需要在组织中允许该工作流运行。仅推送版本标签触发发布，普通 PR 不发布。
 
@@ -95,14 +95,14 @@ git clone --recurse-submodules https://github.com/hi-jian/Vectracast.git
 2. 更新根目录 `RELEASE_NOTES.md`，描述此版本的变化。
 3. 检查、提交并推送改动，然后推送同名版本标签。
 
-首个版本示例（当前 package.json 为 0.7.0）：
+首个版本示例（当前 package.json 为 0.7.1）：
 
 ```sh
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.7.1
+git push origin v0.7.1
 ```
 
-Actions 在 Apple Silicon macOS runner 上检查类型、构建并运行测试，生成 `Vectracast-0.7.0-macOS-arm64.zip` 和 `SHA256SUMS`。附件全部上传到草稿后才正式发布。版本标签必须与 package.json 一致；已发布版本不覆盖，后续修改使用新版本号。
+Actions 在 Apple Silicon macOS runner 上检查类型、构建并运行测试，生成 `Vectracast-0.7.1-macOS-arm64.zip` 和 `SHA256SUMS`。附件全部上传到草稿后才正式发布。版本标签必须与 package.json 一致；已发布版本不覆盖，后续修改使用新版本号。
 
 如果上传期间失败，可到 Releases 检查留下的草稿；客户端只读取正式 Release。修复失败后处理草稿再重跑，不要改写已公开发行版的附件。
 
@@ -152,6 +152,6 @@ GITHUB_REPOSITORY=hi-jian/Vectracast-Plugins node scripts/fetch-previous-index.m
 node scripts/build-plugin-release.mjs extensions build/plugin-release build/previous-index.json
 ```
 
-对插件源码提交创建 `plugins-v0.1.0` 标签。首次标签尚不推送，先通过 GitHub CLI 以已推送的源码提交为目标创建 draft Release，上传完整目录和全部安装包，再公开发布。这样不会提前触发依赖宿主的工作流。随后在应用内检查列表、详情、安装权限与安装后的命令。
+先通过 GitHub CLI 以已推送的完整源码提交 SHA 为目标创建 `plugins-v0.1.0` draft Release，上传完整目录和全部安装包，再公开发布。GitHub 可能同时触发标签工作流；首次尚无宿主工具链时该工作流会在配置检查处失败，不影响已校验的手动引导包。随后在应用内检查列表、详情、安装权限与安装后的命令。
 
-验证通过后才推送主仓库及 `extensions/` 子模块引用，设置插件仓库的 `VECTRACAST_REPOSITORY`、`VECTRACAST_REF` Actions 变量。从下一个 `plugins-v*` 标签开始走自动发布。
+验证通过后才推送主仓库及 `extensions/` 子模块引用，设置插件仓库的 `VECTRACAST_REPOSITORY`、`VECTRACAST_REF` Actions 变量。手动运行一次插件 Actions，确认目录打包与已发布版本校验通过；从下一个 `plugins-v*` 标签开始走自动发布。

@@ -1,6 +1,6 @@
 {
   "name": "vectracast",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Cast vectors, summon anything. A native macOS launcher and plugin platform.",
   "author": "jason",
@@ -22,5 +22,5 @@
     "prettier": "^3.0.0",
     "typescript": "^5.9.0"
   },
-  "buildNumber": 17
+  "buildNumber": 18
 }

@@ -93,13 +93,28 @@ final class Execution: NSObject, RuntimeProtocol {
         let writeDenied: Bool
         do { try Data("probe".utf8).write(to: URL(fileURLWithPath: path + ".write")); writeDenied = false }
         catch { writeDenied = true }
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 3
-        URLSession(configuration: config).dataTask(with: URL(string: "https://example.com")!) { data, _, error in
-            reply(jsonString(["readDenied": readDenied, "writeDenied": writeDenied,
-                              "networkDenied": data == nil && error != nil,
-                              "networkError": (error as NSError?)?.code ?? 0, "pid": getpid()]))
-        }.resume()
+        // A numeric loopback address tests socket authorization without DNS or Internet availability.
+        // Connection refused is NOT evidence of sandboxing: only a permission error passes.
+        let socketFD = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        var networkError: Int32 = 0
+        if socketFD < 0 { networkError = errno }
+        else {
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = UInt16(9).bigEndian
+            address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+            let result = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if result < 0 { networkError = errno }
+            Darwin.close(socketFD)
+        }
+        reply(jsonString(["readDenied": readDenied, "writeDenied": writeDenied,
+                          "networkDenied": networkError == EPERM || networkError == EACCES,
+                          "networkError": networkError, "pid": getpid()]))
     }
 }
 

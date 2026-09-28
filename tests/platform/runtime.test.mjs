@@ -23,7 +23,7 @@ function good(result) { assert.equal(result.status,0,result.stderr+result.stdout
 function bad(result, pattern) { assert.notEqual(result.status,0); assert.match(result.stderr+result.stdout,pattern); }
 
 test('XPC sandbox denies external file read/write and direct network',()=>{
- const p=JSON.parse(good(run('sandbox','--probe'))); assert.equal(p.readDenied,true);assert.equal(p.writeDenied,true);assert.equal(p.networkDenied,true);assert.equal(p.networkError,1);
+ const p=JSON.parse(good(run('sandbox','--probe'))); assert.equal(p.readDenied,true);assert.equal(p.writeDenied,true);assert.equal(p.networkDenied,true);assert.ok([1,13].includes(p.networkError), 'Socket access must fail with EPERM/EACCES, not a DNS or connection error');
 });
 test('real SDK bundle runs in XPC and returns copy actions',async()=>{
  const p=await pack('extensions/text-tools'); good(install('query',p.output,'--accept-permissions'));
