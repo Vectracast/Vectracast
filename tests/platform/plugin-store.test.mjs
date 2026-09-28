@@ -32,7 +32,7 @@ async function query(query = "", plugins = [base], filter = "all") {
         filter,
         preferences: {},
         catalog: {
-          list: async (...args) => { assert.equal(args.length, 0); return { repository: "hi-jian/Vectracast-Plugins", plugins }; },
+          list: async (...args) => { assert.equal(args.length, 0); return { repository: "Vectracast/Vectracast-Plugins", plugins }; },
         },
       }),
     ),

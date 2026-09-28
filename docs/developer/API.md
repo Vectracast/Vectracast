@@ -141,7 +141,7 @@ Manifest 的 `permissions.clipboard` 新增 `history`。启用后授权底座后
 
 命令可声明 `presentation: "list"`、`searchPlaceholder` 和 `filters`，在主窗口显示有返回键的双行列表。结果的 `group` 由插件决定分组；`view.detail` 动作显示结果的 `preview.text` 与 `metadata`，隐藏列表并保留返回状态。详情页动作来自原结果，去除 `view.detail` 自身。现有 `presentation: "detail"` 仍为左右分栏预览。
 
-- `ctx.catalog.list()`：需要 `permissions.catalog: ["read"]`。固定读取 `hi-jian/Vectracast-Plugins`，宿主拒绝携带 `repository` 的调用，返回已校验公开 Release 的目录快照、元数据、已安装版本、来源链接和不透明 `handle`。目录缓存 5 分钟，插件自行匹配和排序。
+- `ctx.catalog.list()`：需要 `permissions.catalog: ["read"]`。固定读取 `Vectracast/Vectracast-Plugins`，宿主拒绝携带 `repository` 的调用，返回已校验公开 Release 的目录快照、元数据、已安装版本、来源链接和不透明 `handle`。目录缓存 5 分钟，插件自行匹配和排序。
 - `catalog.install` 动作：需要 `catalog: ["read", "install"]`；结果 `catalogID` 和动作 `text` 必须使用本次查询签发的同一个 handle。仅用户触发后允许下载，校验后仍须确认被安装插件的权限。查询阶段无安装 API。
 - `catalog.refresh` 动作：需要 `catalog.read`，使目录缓存失效并重新查询。
 - `url.open` 动作：需要 `permissions.browser: ["open"]`，仅用户选择后打开无用户名、密码或自定义端口的 HTTPS URL。

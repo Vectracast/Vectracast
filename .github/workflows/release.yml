@@ -42,5 +42,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft --title "Vectracast $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state.txt; then
+            if [ "$(cat release-state.txt)" = false ]; then
+              echo "Release is already published; leaving its assets unchanged."
+              exit 0
+            fi
+            gh release upload "$RELEASE_TAG" build/release/* --clobber
+          else
+            gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft --title "Vectracast $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          fi
           gh release edit "$RELEASE_TAG" --draft=false --latest

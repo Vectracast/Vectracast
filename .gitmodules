@@ -1,4 +1,4 @@
 [submodule "extensions"]
 	path = extensions
-	url = https://github.com/hi-jian/Vectracast-Plugins.git
+	url = https://github.com/Vectracast/Vectracast-Plugins.git
 	branch = main

@@ -132,11 +132,13 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
 }
 
 enum DistributionSource {
-    static let pluginRepository = "hi-jian/Vectracast-Plugins"
+    static let appRepository = "Vectracast/Vectracast"
+    static let pluginRepository = "Vectracast/Vectracast-Plugins"
     static func validateCatalogRequest(_ input: [String: Any]) throws {
-        guard input["repository"] == nil else { throw LauncherError("插件商店固定使用 hi-jian/Vectracast-Plugins，不支持更换仓库。") }
+        guard input["repository"] == nil else { throw LauncherError("插件商店固定使用 Vectracast/Vectracast-Plugins，不支持更换仓库。") }
     }
     static func repository(_ key: String) -> String {
+        if key == "appRepository" { return appRepository }
         if key == "pluginRepository" { return pluginRepository }
         if let value = UserDefaults.standard.string(forKey: "distribution." + key) { return value }
         guard let url = Bundle.main.url(forResource: "distribution", withExtension: "json"), let data = try? Data(contentsOf: url), let values = try? JSONDecoder().decode([String: String].self, from: data) else { return "" }

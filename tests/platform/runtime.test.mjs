@@ -250,5 +250,5 @@ test('generic page actions survive while forged catalog handles and unsafe brows
 test('catalog RPC rejects source overrides before network access',()=>{
  const source='var Extension={default:{commands:[{id:"convert",query:async()=>{await __rpc("catalog.list",{repository:"attacker/other"});return {items:[]}}}]}};';
  good(install('catalog-fixed-source',fixture({source,permissions:{catalog:['read']}}),'--accept-permissions'));
- bad(run('catalog-fixed-source','--query','test.sample','convert','x'),/固定使用 hi-jian.*Vectracast-Plugins/);
+ bad(run('catalog-fixed-source','--query','test.sample','convert','x'),/固定使用 Vectracast.*Vectracast-Plugins/);
 });

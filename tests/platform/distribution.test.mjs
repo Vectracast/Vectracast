@@ -76,8 +76,11 @@ let equal = try ReleaseVersion("0.7.0") == ReleaseVersion("v0.7.0"); assert(equa
 rejects { _ = try ReleaseVersion("1.0.0-beta.1") }
 rejects { _ = try ReleaseVersion("01.2.3") }
 UserDefaults.standard.set("attacker/other", forKey: "distribution.pluginRepository")
-assert(DistributionSource.repository("pluginRepository") == "hi-jian/Vectracast-Plugins")
+assert(DistributionSource.repository("pluginRepository") == "Vectracast/Vectracast-Plugins")
 UserDefaults.standard.removeObject(forKey: "distribution.pluginRepository")
+UserDefaults.standard.set("attacker/other", forKey: "distribution.appRepository")
+assert(DistributionSource.repository("appRepository") == "Vectracast/Vectracast")
+UserDefaults.standard.removeObject(forKey: "distribution.appRepository")
 try DistributionSource.validateCatalogRequest([:])
 rejects { try DistributionSource.validateCatalogRequest(["repository":"attacker/other"]) }
 let repo = try PublicRepository("https://github.com/test/Vectracast-Plugins.git")
@@ -136,7 +139,7 @@ test("distribution build rejects plugin repository overrides", () => {
       encoding: "utf8", env: {...process.env, CI: "", VECTRACAST_PLUGIN_REPOSITORY: source},
     });
     const valid = run(""); assert.equal(valid.status, 0, valid.stderr);
-    assert.equal(JSON.parse(fs.readFileSync(out)).pluginRepository, "hi-jian/Vectracast-Plugins");
+    assert.equal(JSON.parse(fs.readFileSync(out)).pluginRepository, "Vectracast/Vectracast-Plugins");
     const invalid = run("attacker/other"); assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /repository is fixed/);
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }

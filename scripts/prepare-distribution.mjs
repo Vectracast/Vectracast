@@ -7,7 +7,7 @@ const config = JSON.parse(
 );
 config.appRepository =
   process.env.VECTRACAST_APP_REPOSITORY || config.appRepository;
-const officialPluginRepository = "hi-jian/Vectracast-Plugins";
+const officialPluginRepository = "Vectracast/Vectracast-Plugins";
 if (config.pluginRepository !== officialPluginRepository ||
     (process.env.VECTRACAST_PLUGIN_REPOSITORY && process.env.VECTRACAST_PLUGIN_REPOSITORY !== officialPluginRepository))
   throw Error("Plugin repository is fixed to " + officialPluginRepository);

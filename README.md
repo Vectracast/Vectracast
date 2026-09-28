@@ -46,7 +46,7 @@
 
 Vectracast 负责窗口、输入、插件管理和系统能力。应用搜索、计算器等功能均通过同一套插件机制实现，可以分别安装、停用、升级与回滚。
 
-插件商店本身也是插件。通过「设置 → 扩展 → 发现插件」首次安装随附商店，之后输入 `store` 进入主窗口中的商店，搜索 [官方插件仓库](https://github.com/hi-jian/Vectracast-Plugins) 并安装已打包插件。商店固定使用此仓库，不提供换源设置。插件仓库独立发布，新插件上架无需重新发布应用。
+通过「设置 → 扩展 → 发现插件」打开商店，或输入 `store` 搜索和安装插件。你也可以在 [插件仓库](https://github.com/Vectracast/Vectracast-Plugins) 查看源码、使用说明和发布记录。
 
 插件声明所需权限，安装时展示给用户。剪贴板记录保存在本机，停用插件后停止记录；有道翻译会将待译文本发送到有道服务，应用密钥存入 macOS 钥匙串。
 
@@ -56,7 +56,7 @@ Vectracast 负责窗口、输入、插件管理和系统能力。应用搜索、
 
 ## 安装运行
 
-当前为开发预览版。安装包发布在 [Vectracast Releases](https://github.com/hi-jian/Vectracast/releases)；应用内「检查更新」会显示新版说明并打开下载地址，下载后手动替换应用。
+当前为开发预览版。安装包发布在 [Vectracast Releases](https://github.com/Vectracast/Vectracast/releases)；应用内「检查更新」会显示新版说明并打开下载地址，下载后手动替换应用。
 
 也可以源码构建。需要 Apple Silicon Mac、macOS 13.3 或更新版本、Xcode Command Line Tools，以及 Node.js 和 npm；开发环境使用 Node.js 24。
 

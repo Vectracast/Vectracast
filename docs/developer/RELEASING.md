@@ -1,6 +1,6 @@
 # GitHub 仓库与发布
 
-Vectracast 使用两个 Public 仓库。主仓库为 `hi-jian/Vectracast`，插件仓库为 `hi-jian/Vectracast-Plugins`。
+Vectracast 使用两个 Public 仓库。主仓库为 `Vectracast/Vectracast`，插件仓库为 `Vectracast/Vectracast-Plugins`。
 
 | 仓库 | 内容 | Release 附件 |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ Vectracast 使用两个 Public 仓库。主仓库为 `hi-jian/Vectracast`，插�
 - 不添加 README、`.gitignore` 或 License，本地已经准备好了这些文件。
 - 点击 Create repository，记下两个 HTTPS 地址。
 
-例如：`https://github.com/hi-jian/Vectracast.git` 和 `https://github.com/hi-jian/Vectracast-Plugins.git`。
+例如：`https://github.com/Vectracast/Vectracast.git` 和 `https://github.com/Vectracast/Vectracast-Plugins.git`。
 
 ## 2. 先上传插件仓库
 
@@ -28,7 +28,7 @@ Vectracast 使用两个 Public 仓库。主仓库为 `hi-jian/Vectracast`，插�
 node scripts/prepare-plugin-repository.mjs ../Vectracast-Plugins
 cd ../Vectracast-Plugins
 git init -b main
-git remote add origin https://github.com/hi-jian/Vectracast-Plugins.git
+git remote add origin https://github.com/Vectracast/Vectracast-Plugins.git
 git add .
 git diff --cached --stat
 git commit -m "feat: initialize plugin repository"
@@ -44,15 +44,15 @@ git push -u origin main
 ```sh
 git rm -r --cached --ignore-unmatch extensions
 test ! -e ../Vectracast-extensions-backup && mv extensions ../Vectracast-extensions-backup
-git submodule add -b main https://github.com/hi-jian/Vectracast-Plugins.git extensions
+git submodule add -b main https://github.com/Vectracast/Vectracast-Plugins.git extensions
 ```
 
 将根目录 `distribution.json` 的 `appRepository` 改为实际主仓库名称；`pluginRepository` 已固定，不可改动：
 
 ```json
 {
-  "appRepository": "hi-jian/Vectracast",
-  "pluginRepository": "hi-jian/Vectracast-Plugins"
+  "appRepository": "Vectracast/Vectracast",
+  "pluginRepository": "Vectracast/Vectracast-Plugins"
 }
 ```
 
@@ -60,7 +60,7 @@ git submodule add -b main https://github.com/hi-jian/Vectracast-Plugins.git exte
 
 ```sh
 git branch -M main
-git remote add origin https://github.com/hi-jian/Vectracast.git
+git remote add origin https://github.com/Vectracast/Vectracast.git
 git status --short
 git add .
 git diff --cached --stat
@@ -71,7 +71,7 @@ git push -u origin main
 以后克隆主仓库要带子模块：
 
 ```sh
-git clone --recurse-submodules https://github.com/hi-jian/Vectracast.git
+git clone --recurse-submodules https://github.com/Vectracast/Vectracast.git
 ```
 
 已克隆的仓库执行 `git submodule update --init --recursive` 即可补齐插件。
@@ -82,8 +82,8 @@ git clone --recurse-submodules https://github.com/hi-jian/Vectracast.git
 
 | 所属仓库 | 变量 | 值 |
 | --- | --- | --- |
-| 插件仓库 | `VECTRACAST_REPOSITORY` | `hi-jian/Vectracast` |
-| 插件仓库 | `VECTRACAST_REF` | 宿主工具链的固定版本，例如 `v0.7.1`，或完整提交 SHA |
+| 插件仓库 | `VECTRACAST_REPOSITORY` | `Vectracast/Vectracast` |
+| 插件仓库 | `VECTRACAST_REF` | 宿主工具链的固定版本，例如 `v0.7.2`，或完整提交 SHA |
 
 工作流使用 GitHub 提供的 `GITHUB_TOKEN`，不需要个人访问令牌。发布作业请求 `contents: write`；若组织策略限制 Actions，需要在组织中允许该工作流运行。仅推送版本标签触发发布，普通 PR 不发布。
 
@@ -91,18 +91,18 @@ git clone --recurse-submodules https://github.com/hi-jian/Vectracast.git
 
 ## 5. 发布应用
 
-1. 修改 `package.json` 的 `version` 和 `buildNumber`，同步 lockfile 版本。`npm version 0.7.1 --no-git-tag-version` 可以更新两个版本字段；`buildNumber` 另行递增。
+1. 修改 `package.json` 的 `version` 和 `buildNumber`，同步 lockfile 版本。`npm version 0.7.2 --no-git-tag-version` 可以更新两个版本字段；`buildNumber` 另行递增。
 2. 更新根目录 `RELEASE_NOTES.md`，描述此版本的变化。
 3. 检查、提交并推送改动，然后推送同名版本标签。
 
-首个版本示例（当前 package.json 为 0.7.1）：
+首个版本示例（当前 package.json 为 0.7.2）：
 
 ```sh
-git tag v0.7.1
-git push origin v0.7.1
+git tag v0.7.2
+git push origin v0.7.2
 ```
 
-Actions 在 Apple Silicon macOS runner 上检查类型、构建并运行测试，生成 `Vectracast-0.7.1-macOS-arm64.zip` 和 `SHA256SUMS`。附件全部上传到草稿后才正式发布。版本标签必须与 package.json 一致；已发布版本不覆盖，后续修改使用新版本号。
+Actions 在 Apple Silicon macOS runner 上检查类型、构建并运行测试，生成 `Vectracast-0.7.2-macOS-arm64.zip` 和 `SHA256SUMS`。附件全部上传到草稿后才正式发布。版本标签必须与 package.json 一致；已发布版本不覆盖，后续修改使用新版本号。
 
 如果上传期间失败，可到 Releases 检查留下的草稿；客户端只读取正式 Release。修复失败后处理草稿再重跑，不要改写已公开发行版的附件。
 
@@ -123,7 +123,7 @@ git push origin plugins-v0.1.0
 
 用户打开「设置 → 扩展 → 发现插件」，首次确认安装随附的商店插件，之后使用 `store`、`plugins` 或“插件商店”进入。商店负责名称、ID、命令、关键词检索、分类和详情；选中插件后确认权限，再安装或更新。客户端下载同一 Release 中的安装包，检查文件大小、SHA-256、manifest 和 SDK，再调用现有安装机制；安装失败保留原版本。更新后的插件仍可在已安装列表中回滚。
 
-商店固定信任 `hi-jian/Vectracast-Plugins` 与 HTTPS 发布渠道。插件、用户偏好和构建环境变量均不能更换商店来源；SHA-256 检查包与索引是否一致，不代表独立的发布者数字签名。
+商店固定信任 `Vectracast/Vectracast-Plugins` 与 HTTPS 发布渠道。插件、用户偏好和构建环境变量均不能更换商店来源；SHA-256 检查包与索引是否一致，不代表独立的发布者数字签名。
 
 主仓库需要跟进新的插件源码时，更新并提交 submodule 指针：
 
@@ -136,7 +136,7 @@ git push
 
 ## 配置与验证边界
 
-本地未填 `distribution.json` 时，检查更新窗口会要求输入 `用户名/仓库名`；插件商店固定连接 `hi-jian/Vectracast-Plugins`，无仓库输入项。主应用更新源为 `hi-jian/Vectracast`。
+检查更新直接读取 `Vectracast/Vectracast`，插件目录读取 `Vectracast/Vectracast-Plugins`。两处均不提供来源输入项；旧的仓库偏好值不参与请求。
 
 本地构建、包校验测试和打包成功不等于线上发布成功。首次发布后应确认：两个 Actions 成功、Release 附件齐全、干净数据目录可以发现并安装插件、旧版本应用能读取新版本及更新内容。
 
@@ -148,7 +148,7 @@ git push
 两个空仓库首次接入时，插件 Actions 尚不能取得宿主工具链。先提交插件源码并推送 `main`，使用本地已经通过测试的宿主工具打包：
 
 ```sh
-GITHUB_REPOSITORY=hi-jian/Vectracast-Plugins node scripts/fetch-previous-index.mjs build/previous-index.json
+GITHUB_REPOSITORY=Vectracast/Vectracast-Plugins node scripts/fetch-previous-index.mjs build/previous-index.json
 node scripts/build-plugin-release.mjs extensions build/plugin-release build/previous-index.json
 ```
 

@@ -86,7 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
                 _ = try store.install(data, acceptPermissions: true); settings.refreshInstalledExtensions()
             }
-            settings.window.close()
+            // Keep Settings available behind the launcher. Closing it switches activation policy
+            // to accessory asynchronously, which can deactivate and immediately hide the launcher.
+            if settings.window.isVisible { settings.window.orderBack(nil) }
             launcher.show(commandInput: "插件商店")
         } catch { let alert = NSAlert(error: error); alert.runModal() }
     }
