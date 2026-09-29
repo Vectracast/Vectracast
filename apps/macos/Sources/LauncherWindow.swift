@@ -165,6 +165,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         search.frame = NSRect(x: 16, y: 14, width: 700, height: 34)
         search.font = .systemFont(ofSize: 20)
         search.isBordered = false; search.drawsBackground = false; search.focusRingType = .none
+        search.cell?.usesSingleLineMode = true
+        search.cell?.wraps = false; search.cell?.isScrollable = true
+        search.cell?.lineBreakMode = .byTruncatingTail
         search.placeholderString = "搜索应用与命令…"
         search.delegate = self
         search.setAccessibilityLabel("搜索应用和扩展")
@@ -480,6 +483,16 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             beginWaiting()
             return
         }
+        let normalized = search.stringValue
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        if normalized != search.stringValue {
+            let editor = search.currentEditor() as? NSTextView
+            let caret = editor?.selectedRange().location ?? normalized.utf16.count
+            search.stringValue = normalized
+            editor?.setSelectedRange(NSRange(location: min(caret, normalized.utf16.count), length: 0))
+        }
         updateQuery()
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -753,9 +766,13 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             guard let extensionID = item.extensionID, let path = item.applicationPath,
                   action.text == item.applicationId,
                   store.list().contains(where: { $0.enabled && $0.manifest.id == extensionID && $0.manifest.permissions.applications?.contains("open") == true }) else { footer.stringValue = "扩展已禁用或没有应用操作权限"; return }
+            if action.type == "application.open" { dismiss() }
             ApplicationActions.perform(action.type, url: URL(fileURLWithPath: path)) { [weak self] error in
-                if let error { self?.footer.stringValue = error; self?.panel.makeKeyAndOrderFront(nil); self?.focusSearch() }
-                else { self?.dismiss() }
+                guard let self else { return }
+                if let error {
+                    if action.type == "application.open" { self.show() }
+                    self.footer.stringValue = error; self.panel.makeKeyAndOrderFront(nil); self.focusSearch()
+                } else if action.type != "application.open" { self.dismiss() }
             }
         default: break
         }
@@ -809,14 +826,8 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             guard let self else { return }
             defer { self.installingPlugin = false }
             do {
-                let (data, package, source) = try await PluginCatalogService.shared.download(handle)
+                let (data, _, _) = try await PluginCatalogService.shared.download(handle)
                 guard self.panel.isVisible, self.store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.catalog?.contains("install") == true }) else { return }
-                let alert = NSAlert(); alert.messageText = "安装 \(package.manifest.name) v\(package.manifest.version)？"
-                alert.informativeText = "来源：\(source)\n\n" + (package.manifest.permissionSummary.isEmpty ? "无外部能力" : package.manifest.permissionSummary)
-                alert.addButton(withTitle: "安装并授权"); alert.addButton(withTitle: "取消")
-                let response = alert.runModal(); self.panel.makeKeyAndOrderFront(nil)
-                guard response == .alertFirstButtonReturn else { self.footer.stringValue = "已取消安装"; self.focusSearch(); return }
-                guard self.store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.catalog?.contains("install") == true }) else { return }
                 _ = try self.store.install(data, acceptPermissions: true); self.onPluginsChanged?()
                 self.updateQuery(immediate: true); self.focusSearch()
             } catch { self.footer.stringValue = "安装失败：" + error.localizedDescription }

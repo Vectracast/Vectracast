@@ -37,6 +37,8 @@ jobs:
       - name: Test the signed bundle
         run: node --test --test-concurrency=1 tests/platform/*.test.mjs
       - run: node scripts/package-app-release.mjs
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,8 +49,8 @@ jobs:
               echo "Release is already published; leaving its assets unchanged."
               exit 0
             fi
-            gh release upload "$RELEASE_TAG" build/release/* --clobber
+            gh release upload "$RELEASE_TAG" build/release/Vectracast-*.zip build/release/SHA256SUMS build/release/appcast.xml --clobber
           else
-            gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft --title "Vectracast $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+            gh release create "$RELEASE_TAG" build/release/Vectracast-*.zip build/release/SHA256SUMS build/release/appcast.xml --verify-tag --draft --title "Vectracast $RELEASE_TAG" --notes-file RELEASE_NOTES.md
           fi
           gh release edit "$RELEASE_TAG" --draft=false --latest

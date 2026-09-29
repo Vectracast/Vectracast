@@ -32,10 +32,28 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
     private var splitLine: NSBox?
     private var preferredBodyHeight: CGFloat = 500
     private var current: InstalledExtension? { extensions.indices.contains(table.selectedRow) ? extensions[table.selectedRow] : nil }
+    private let catalogService: PluginCatalogService
+    private var catalogSnapshot: PluginCatalogService.Snapshot?
+    private var catalogTask: Task<Void, Never>?
+    private var catalogObserver: NSObjectProtocol?
+    private let catalogStatus = NSTextField(labelWithString: "")
+    private let catalogRefresh = NSButton(title: "检查更新", target: nil, action: nil)
+    private var updatingID: String?
+    private var updateMessage: [String: String] = [:]
+    private var updateProgressValue: (received: Int64, expected: Int64)?
+    private var updateProgressLabel: NSTextField?
+    private var updateProgressBar: NSProgressIndicator?
     private let prefs = AppPreferences.shared
 
-    init(store: ExtensionStore) {
-        self.store = store; super.init()
+    init(store: ExtensionStore, catalogService: PluginCatalogService = .shared) {
+        self.store = store; self.catalogService = catalogService; super.init()
+        catalogRefresh.target = self; catalogRefresh.action = #selector(refreshCatalog)
+        catalogRefresh.bezelStyle = .rounded; catalogRefresh.controlSize = .small
+        catalogStatus.font = .systemFont(ofSize: 11); catalogStatus.textColor = .secondaryLabelColor
+        catalogStatus.lineBreakMode = .byTruncatingTail
+        catalogObserver = NotificationCenter.default.addObserver(forName: .init("VectracastCatalogUpdated"), object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.page == "extensions" else { return }; self.loadCatalog()
+        }
         window.title = "Vectracast 设置"; window.isReleasedWhenClosed = false; window.delegate = self
         window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
@@ -78,6 +96,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         form.translatesAutoresizingMaskIntoConstraints = false
         applyAppearance(); render()
     }
+    deinit { if let catalogObserver { NotificationCenter.default.removeObserver(catalogObserver) }; catalogTask?.cancel() }
     func applyAppearance() {
         window.appearance = prefs.appearance
         let dark = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -215,7 +234,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         root.frame = NSRect(origin: .zero, size: target.size)
         body.frame = NSRect(x: 0, y: SettingsSizing.headerHeight, width: SettingsSizing.width, height: height - SettingsSizing.headerHeight)
         contentScroll?.frame = body.bounds
-        listScroll?.frame = NSRect(x: 8, y: 54, width: 629, height: max(0, body.bounds.height - 64))
+        listScroll?.frame = NSRect(x: 8, y: 78, width: 629, height: max(0, body.bounds.height - 88))
         detailScroll?.frame = NSRect(x: 675, y: 24, width: 308, height: max(0, body.bounds.height - 40))
         splitLine?.frame = NSRect(x: 650, y: 0, width: 1, height: body.bounds.height)
         let state: [String: Any] = ["page": page, "width": window.frame.width, "height": window.frame.height, "requestedBodyHeight": requested, "maximumHeight": min(SettingsSizing.maximumHeight, visible.height - 40), "top": window.frame.maxY]
@@ -223,7 +242,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
     private func fitExtensions(animated: Bool) {
         root.layoutSubtreeIfNeeded(); form.layoutSubtreeIfNeeded()
-        let listHeight = 54 + 28 + CGFloat(extensions.count) * (table.rowHeight + 1) + 16
+        let listHeight = 78 + 28 + CGFloat(extensions.count) * (table.rowHeight + 1) + 16
         let detailHeight = ceil(form.fittingSize.height) + 40
         fitContent(max(280, listHeight, detailHeight), animated: animated)
     }
@@ -352,7 +371,10 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         filter.frame = NSRect(x: 16, y: 14, width: 330, height: 28); body.addSubview(filter)
         let catalog = button("发现插件…", #selector(openCatalog)); catalog.frame = NSRect(x: 362, y: 12, width: 130, height: 32); body.addSubview(catalog)
         let install = button("安装扩展…", #selector(installPackage)); install.frame = NSRect(x: 502, y: 12, width: 130, height: 32); body.addSubview(install)
-        let scroll = NSScrollView(frame: NSRect(x: 8, y: 54, width: 629, height: 494)); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.documentView = table; body.addSubview(scroll); listScroll = scroll
+        catalogStatus.frame = NSRect(x: 20, y: 49, width: 505, height: 20); body.addSubview(catalogStatus)
+        catalogRefresh.frame = NSRect(x: 538, y: 46, width: 94, height: 24); body.addSubview(catalogRefresh)
+        loadCatalog()
+        let scroll = NSScrollView(frame: NSRect(x: 8, y: 78, width: 629, height: 470)); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.documentView = table; body.addSubview(scroll); listScroll = scroll
         let line = NSBox(frame: NSRect(x: 650, y: 0, width: 1, height: 563)); line.boxType = .separator; body.addSubview(line); splitLine = line
         let formScroll = NSScrollView(frame: NSRect(x: 675, y: 25, width: 308, height: 520)); formScroll.hasVerticalScroller = true; formScroll.autohidesScrollers = true; formScroll.drawsBackground = false
         form.removeFromSuperview()
@@ -361,10 +383,12 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         reloadExtensions(); if !extensions.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }; renderForm()
     }
     private func reloadExtensions() {
+        let selectedID = current?.manifest.id
         let text = filter.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         extensions = store.list().filter { text.isEmpty || ([$0.manifest.name, $0.manifest.id] + $0.manifest.commands.flatMap { [$0.title] + $0.keywords }).contains(where: { $0.localizedCaseInsensitiveContains(text) }) }; table.reloadData()
+        if let selectedID, let index = extensions.firstIndex(where: { $0.manifest.id == selectedID }) { table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
     }
-    func refreshInstalledExtensions() { if page == "extensions" { reloadExtensions(); renderForm() } }
+    func refreshInstalledExtensions() { if page == "extensions" { if catalogSnapshot != nil { refreshCatalogPresentation() } else { reloadExtensions(); renderForm() } } }
     func controlTextDidChange(_ obj: Notification) { guard obj.object as? NSSearchField === filter else { return }; reloadExtensions(); if !extensions.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }; renderForm() }
     func controlTextDidEndEditing(_ obj: Notification) { if let field = obj.object as? NSTextField, field.identifier?.rawValue.contains("/") == true { saveAlias(field) } }
     @objc private func saveAlias(_ sender: NSTextField) {
@@ -384,6 +408,60 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
     @objc private func clearCommandShortcut(_ sender: NSButton) { if let key = sender.identifier?.rawValue { _ = onShortcut?(key, nil); changed(current?.manifest.id) } }
     @objc private func openData() { NSWorkspace.shared.open(store.root) }
     @objc private func openLogs() { onDeveloperWindow?(.logs) }
+    @objc private func refreshCatalog() { loadCatalog(force: true) }
+    private func loadCatalog(force: Bool = false) {
+        guard catalogTask == nil else { return }
+        catalogStatus.stringValue = "正在检查插件更新…"; catalogRefresh.isEnabled = false
+        catalogTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.catalogTask = nil; self.catalogRefresh.isEnabled = true }
+            do {
+                if force { await self.catalogService.invalidate() }
+                self.catalogSnapshot = try await self.catalogService.load()
+                self.refreshCatalogPresentation()
+            } catch { self.catalogStatus.stringValue = "检查失败，点击重试 · " + error.localizedDescription }
+        }
+    }
+    private func refreshCatalogPresentation() {
+        let count = store.list().filter { catalogSnapshot?.update(for: $0) != nil }.count
+        catalogStatus.stringValue = count > 0 ? "有 \(count) 个插件可更新" : "所有商店插件均为最新版本"
+        if page == "extensions" { reloadExtensions(); renderForm() }
+    }
+    private func compatible(_ entry: PluginIndex.Entry) -> Bool {
+        guard let required = try? ReleaseVersion(entry.minimumAppVersion),
+              let current = try? ReleaseVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.9.0") else { return false }
+        return current >= required
+    }
+    @objc private func updatePlugin(_ sender: NSButton) {
+        guard updatingID == nil, let id = sender.identifier?.rawValue,
+              let original = store.list().first(where: { $0.manifest.id == id }), !original.development else { return }
+        updatingID = id; updateProgressValue = nil; updateMessage[id] = "正在下载并校验…"
+        if let row = extensions.firstIndex(where: { $0.manifest.id == id }) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); table.scrollRowToVisible(row)
+        }
+        refreshCatalogPresentation()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.updatingID = nil; self.refreshCatalogPresentation() }
+            do {
+                // Refresh opaque handles before downloading, including after a long-open settings session.
+                let snapshot = try await self.catalogService.load(); self.catalogSnapshot = snapshot
+                guard let (handle, entry) = snapshot.update(for: original), self.compatible(entry) else {
+                    throw LauncherError("没有兼容的更新，请检查插件目录或更新 Vectracast。")
+                }
+                let (data, _, _) = try await self.catalogService.download(handle) { [weak self] received, expected in
+                    Task { @MainActor [weak self] in self?.recordUpdateProgress(received: received, expected: expected) }
+                }
+                guard let current = self.store.list().first(where: { $0.manifest.id == id }),
+                      !current.development, current.manifest.version == original.manifest.version else {
+                    throw LauncherError("插件状态已改变，请重新尝试更新。")
+                }
+                let manifest = try self.store.install(data, acceptPermissions: true)
+                self.updateMessage[id] = "已更新到 v" + manifest.version; self.updateProgressValue = nil
+                self.onChange?()
+            } catch { self.updateMessage[id] = "更新失败：" + error.localizedDescription; self.updateProgressValue = nil }
+        }
+    }
     @objc private func openCatalog() { onDistribution?(true) }
     @objc private func checkUpdates() { onDistribution?(false) }
     private func label(_ value: String, size: CGFloat = 13, secondary: Bool = false) {
@@ -402,6 +480,29 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         }
         label(info.manifest.name, size: 19)
         label(info.manifest.id + " · v" + info.manifest.version + (info.development ? " · 开发模式" : " · 本地安装"), size: 11, secondary: true)
+        if let message = updateMessage[info.manifest.id] { label(message, size: 12, secondary: true) }
+        if let (_, entry) = catalogSnapshot?.update(for: info) {
+            label("可更新 · v\(info.manifest.version) → v\(entry.manifest.version)", size: 12)
+            if !compatible(entry) { label("需要 Vectracast " + entry.minimumAppVersion + " 或更新版本", size: 11, secondary: true) }
+            let update = button(updatingID == info.manifest.id ? "正在更新…" : "更新插件", #selector(updatePlugin(_:)))
+            update.identifier = NSUserInterfaceItemIdentifier(info.manifest.id); update.isEnabled = updatingID == nil && compatible(entry)
+            form.addArrangedSubview(update)
+        }
+        if updatingID == info.manifest.id {
+            let status = NSTextField(labelWithString: updateProgressDescription())
+            status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor
+            form.addArrangedSubview(status); updateProgressLabel = status
+            let progress = NSProgressIndicator(); progress.style = .bar; progress.maxValue = 1
+            progress.isIndeterminate = (updateProgressValue?.expected ?? 0) <= 0
+            if let value = updateProgressValue, value.expected > 0 {
+                progress.doubleValue = min(1, Double(value.received) / Double(value.expected))
+            }
+            form.addArrangedSubview(progress); progress.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -15).isActive = true
+            if progress.isIndeterminate { progress.startAnimation(nil) }
+            updateProgressBar = progress
+        } else {
+            updateProgressLabel = nil; updateProgressBar = nil
+        }
         label(info.manifest.description, secondary: true)
         let enabled = NSButton(checkboxWithTitle: "启用扩展", target: self, action: #selector(toggleEnabled(_:)))
         enabled.state = info.enabled ? .on : .off; form.addArrangedSubview(enabled)
@@ -457,6 +558,23 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         let uninstall = NSButton(title: "卸载…", target: self, action: #selector(uninstall)); uninstall.bezelStyle = .rounded
         actions.addArrangedSubview(rollback); actions.addArrangedSubview(uninstall); form.addArrangedSubview(actions)
         if let previous = info.previous { label("可回滚到 v" + previous, size: 11, secondary: true) }
+    }
+    private func updateProgressDescription() -> String {
+        guard let value = updateProgressValue else { return "正在连接下载服务器…" }
+        let received = ByteCountFormatter.string(fromByteCount: max(0, value.received), countStyle: .file)
+        guard value.expected > 0 else { return "已下载 \(received)" }
+        let expected = ByteCountFormatter.string(fromByteCount: value.expected, countStyle: .file)
+        let percent = min(100, max(0, Int(Double(value.received) / Double(value.expected) * 100)))
+        return "\(received) / \(expected) · \(percent)%"
+    }
+    private func recordUpdateProgress(received: Int64, expected: Int64) {
+        guard updatingID != nil else { return }
+        updateProgressValue = (max(0, received), max(0, expected))
+        updateProgressLabel?.stringValue = updateProgressDescription()
+        if expected > 0, let bar = updateProgressBar {
+            bar.stopAnimation(nil); bar.isIndeterminate = false
+            bar.doubleValue = min(1, Double(max(0, received)) / Double(expected))
+        }
     }
     private func notify(_ title: String, _ message: String = "") {
         let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
@@ -521,14 +639,29 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
         case "enabled":
             let item = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleRow(_:)))
             item.translatesAutoresizingMaskIntoConstraints = false; item.identifier = NSUserInterfaceItemIdentifier(info.manifest.id); item.state = info.enabled ? .on : .off; item.setAccessibilityLabel("启用" + info.manifest.name); cell.addSubview(item); NSLayoutConstraint.activate([item.centerXAnchor.constraint(equalTo: cell.centerXAnchor), item.centerYAnchor.constraint(equalTo: cell.centerYAnchor)]); return cell
-        case "type": value = info.development ? "开发扩展" : "扩展"
+        case "type":
+            if let (_, entry) = catalogSnapshot?.update(for: info) {
+                let update = button(updatingID == info.manifest.id ? "更新中" : "更新", #selector(updatePlugin(_:)))
+                update.identifier = NSUserInterfaceItemIdentifier(info.manifest.id)
+                update.isEnabled = updatingID == nil && compatible(entry)
+                update.toolTip = "v\(info.manifest.version) → v\(entry.manifest.version)" + (compatible(entry) ? "" : " · 请先更新 Vectracast")
+                update.setAccessibilityLabel("更新" + info.manifest.name + "到" + entry.manifest.version)
+                update.frame = NSRect(x: 2, y: 6, width: 61, height: 28); cell.addSubview(update); return cell
+            }
+            value = info.development ? "开发扩展" : "扩展"
         case "alias":
             let keywords = info.manifest.commands.flatMap { prefs.keywords(info, $0) }
             value = ((info.manifest.commands.contains(where: \.isImplicit) ? ["直接输入"] : []) + keywords).joined(separator: " · ")
         case "hotkey": value = info.manifest.commands.compactMap { prefs.values.commandShortcuts[info.manifest.id + "/" + $0.id]?.label }.first ?? "—"
         default:
             let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 20, height: 20)); icon.image = NSImage(systemSymbolName: info.manifest.icon, accessibilityDescription: nil); icon.contentTintColor = info.manifest.id == "local.youdao" ? .systemRed : .systemBlue; cell.addSubview(icon)
-            let text = NSTextField(labelWithString: info.manifest.name); text.font = .systemFont(ofSize: 13, weight: .medium); text.frame = NSRect(x: 39, y: 10, width: (tableColumn?.width ?? 210) - 47, height: 20); cell.addSubview(text); return cell
+            let text = NSTextField(labelWithString: info.manifest.name); text.font = .systemFont(ofSize: 13, weight: .medium); let hasUpdate = catalogSnapshot?.update(for: info) != nil
+            text.frame = NSRect(x: 39, y: 10, width: (tableColumn?.width ?? 210) - (hasUpdate ? 101 : 47), height: 20); text.lineBreakMode = .byTruncatingTail; cell.addSubview(text)
+            if hasUpdate {
+                let badge = NSTextField(labelWithString: "有更新"); badge.font = .systemFont(ofSize: 10, weight: .medium); badge.textColor = .systemBlue
+                badge.frame = NSRect(x: (tableColumn?.width ?? 210) - 56, y: 12, width: 50, height: 17); cell.addSubview(badge)
+            }
+            return cell
         }
         let text = NSTextField(labelWithString: value); text.font = .systemFont(ofSize: 12); text.textColor = .secondaryLabelColor; text.frame = NSRect(x: 8, y: 10, width: (tableColumn?.width ?? 90) - 16, height: 20); text.lineBreakMode = .byTruncatingTail; cell.addSubview(text); return cell
     }

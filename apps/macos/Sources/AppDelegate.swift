@@ -81,9 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 guard let url = Bundle.main.url(forResource: "PluginStore", withExtension: "launcher-extension") else { throw LauncherError("缺少随附商店包，请重新构建应用。") }
                 let data = try Data(contentsOf: url), package = try JSONDecoder().decode(ExtensionPackage.self, from: data); try package.validate()
-                let alert = NSAlert(); alert.messageText = "安装随附的插件商店？"; alert.informativeText = package.manifest.permissionSummary
-                alert.addButton(withTitle: "安装并打开"); alert.addButton(withTitle: "取消")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
                 _ = try store.install(data, acceptPermissions: true); settings.refreshInstalledExtensions()
             }
             // Keep Settings available behind the launcher. Closing it switches activation policy

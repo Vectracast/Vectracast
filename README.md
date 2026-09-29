@@ -56,7 +56,7 @@ Vectracast 负责窗口、输入、插件管理和系统能力。应用搜索、
 
 ## 安装运行
 
-当前为开发预览版。安装包发布在 [Vectracast Releases](https://github.com/Vectracast/Vectracast/releases)；应用内「检查更新」会显示新版说明并打开下载地址，下载后手动替换应用。
+当前为开发预览版。安装包发布在 [Vectracast Releases](https://github.com/Vectracast/Vectracast/releases)；从 0.9.0 起，在应用内打开「检查更新」，查看更新说明后点击「更新并重启」，即可下载、验证并安装新版。下载时显示进度，也可以取消。0.8.0 及更早版本需要先手动安装一次带自动更新功能的版本。
 
 也可以源码构建。需要 Apple Silicon Mac、macOS 13.3 或更新版本、Xcode Command Line Tools，以及 Node.js 和 npm；开发环境使用 Node.js 24。
 

@@ -82,15 +82,17 @@ struct PluginIndex: Codable {
 
 // Fixed distribution service only. The session neither sends cookies nor accepts cross-origin redirects.
 final class PublicDownload: NSObject, URLSessionDataDelegate {
+    typealias ProgressHandler = @Sendable (Int64, Int64) -> Void
     private var data = Data()
     private let limit: Int
+    private let progress: ProgressHandler
     private var continuation: CheckedContinuation<Data, Error>?
     private var session: URLSession?
     private var task: URLSessionDataTask?
     private var failure: Error?
-    private init(limit: Int) { self.limit = limit }
-    static func data(from url: URL, limit: Int) async throws -> Data {
-        let download = PublicDownload(limit: limit)
+    private init(limit: Int, progress: @escaping ProgressHandler) { self.limit = limit; self.progress = progress }
+    static func data(from url: URL, limit: Int, progress: @escaping ProgressHandler = { _, _ in }) async throws -> Data {
+        let download = PublicDownload(limit: limit, progress: progress)
         return try await download.start(url)
     }
     private func start(_ url: URL) async throws -> Data {
@@ -122,11 +124,13 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
             else { failure = LauncherError("数据服务暂时不可用，请稍后重试（HTTP \(status)）。") }
             completionHandler(.cancel); return
         }
+        self.progress(0, response.expectedContentLength > 0 ? response.expectedContentLength : 0)
         completionHandler(.allow)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
         guard data.count + chunk.count <= limit else { failure = LauncherError("下载超过大小限制。"); dataTask.cancel(); return }
         data.append(chunk)
+        progress(Int64(data.count), dataTask.response?.expectedContentLength ?? 0)
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error = failure ?? error { continuation?.resume(throwing: error) } else { continuation?.resume(returning: data) }

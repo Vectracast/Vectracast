@@ -3,11 +3,19 @@ import Foundation
 /// Transport, integrity and opaque installation targets. Search and presentation belong to plugins.
 actor PluginCatalogService {
     static let shared = PluginCatalogService()
+    typealias DownloadProgress = @Sendable (Int64, Int64) -> Void
+    typealias PackageFetcher = @Sendable (URL, @escaping DownloadProgress) async throws -> Data
     struct Snapshot {
         let repository: PublicRepository
         let release: PublicRelease
         let entries: [(String, PluginIndex.Entry)]
         let loaded: Date
+        func update(for info: InstalledExtension) -> (String, PluginIndex.Entry)? {
+            guard !info.development, let installed = try? ReleaseVersion(info.manifest.version) else { return nil }
+            return entries.first { _, entry in
+                entry.manifest.id == info.manifest.id && (try? ReleaseVersion(entry.manifest.version)).map { $0 > installed } == true
+            }
+        }
     }
     private var snapshots: [String: Snapshot] = [:]
     private var pending: Task<Snapshot, Error>?
@@ -16,8 +24,9 @@ actor PluginCatalogService {
     private var lastAttempt = Date.distantPast
     private let cacheURL: URL
     private let fetch: @Sendable (PublicRepository) async throws -> CatalogCache
-    init(cacheURL: URL? = nil, fetch: @escaping @Sendable (PublicRepository) async throws -> CatalogCache = { try await PluginCatalogService.fetchRemote($0) }) {
-        self.fetch = fetch
+    private let fetchPackage: PackageFetcher
+    init(cacheURL: URL? = nil, fetchPackage: @escaping PackageFetcher = { try await PublicDownload.data(from: $0, limit: 3_000_000, progress: $1) }, fetch: @escaping @Sendable (PublicRepository) async throws -> CatalogCache = { try await PluginCatalogService.fetchRemote($0) }) {
+        self.fetch = fetch; self.fetchPackage = fetchPackage
         let base = ProcessInfo.processInfo.environment["LAUNCHER_HOME"].map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Vectracast")
         self.cacheURL = cacheURL ?? base.appendingPathComponent("catalog/official-v1.json")
@@ -69,14 +78,14 @@ actor PluginCatalogService {
         forceRefresh = false
         return try await refresh(repository).value
     }
-    func download(_ handle: String) async throws -> (Data, ExtensionPackage, String) {
+    func download(_ handle: String, progress: @escaping DownloadProgress = { _, _ in }) async throws -> (Data, ExtensionPackage, String) {
         guard let snapshot = snapshots.values.first(where: { $0.entries.contains { $0.0 == handle } }),
               let entry = snapshot.entries.first(where: { $0.0 == handle })?.1,
               Date().timeIntervalSince(snapshot.loaded) < 600 else { throw LauncherError("目录已过期，请刷新后重试。") }
         let current = try ReleaseVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.0")
         guard current >= (try ReleaseVersion(entry.minimumAppVersion)) else { throw LauncherError("请先更新 Vectracast。") }
         let url = try snapshot.release.asset(entry.asset, repository: snapshot.repository, limit: 3_000_000)
-        let data = try await PublicDownload.data(from: url, limit: 3_000_000)
+        let data = try await fetchPackage(url, progress)
         return (data, try entry.verify(data), snapshot.repository.name)
     }
 }

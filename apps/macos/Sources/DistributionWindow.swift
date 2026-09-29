@@ -1,7 +1,8 @@
 import AppKit
+import Sparkle
 
 /// Updates the platform itself. Plugin discovery is provided by the separately packaged store plugin.
-final class DistributionWindow: NSObject, NSWindowDelegate {
+final class DistributionWindow: NSObject, NSWindowDelegate, SPUUserDriver {
     let window: NSWindow
     private let status = NSTextField(labelWithString: "正在检查更新")
     private let subtitle = NSTextField(labelWithString: "正在获取最新版本信息…")
@@ -11,9 +12,13 @@ final class DistributionWindow: NSObject, NSWindowDelegate {
     private let refresh = NSButton(title: "重新检查", target: nil, action: nil)
     private let progress = NSProgressIndicator()
     private let stateIcon = NSImageView()
-    private var downloadURL: URL?
-    private var generation = 0
-    private var request: Task<Void, Never>?
+    private lazy var updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: nil)
+    private var started = false
+    private var cancelUpdate: (() -> Void)?
+    private var chooseUpdate: ((SPUUserUpdateChoice) -> Void)?
+    private var expectedBytes: UInt64 = 0
+    private var receivedBytes: UInt64 = 0
+    private var installRequested = false
     private var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.0" }
     override init() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 510), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -36,12 +41,40 @@ final class DistributionWindow: NSObject, NSWindowDelegate {
         detail.textContainerInset = NSSize(width: 2, height: 0); detail.isVerticallyResizable = true; detail.isHorizontallyResizable = false; detail.autoresizingMask = [.width]; detail.textContainer?.widthTracksTextView = true
         detail.frame = NSRect(origin: .zero, size: scroll.contentSize); scroll.documentView = detail; root.addSubview(scroll)
         let line = NSBox(); line.boxType = .separator; line.frame = NSRect(x: 0, y: 456, width: 580, height: 1); root.addSubview(line)
-        refresh.frame = NSRect(x: 26, y: 469, width: 105, height: 28); refresh.bezelStyle = .rounded; refresh.target = self; refresh.action = #selector(loadRepository); root.addSubview(refresh)
+        refresh.frame = NSRect(x: 26, y: 469, width: 105, height: 28); refresh.bezelStyle = .rounded; refresh.target = self; refresh.action = #selector(refreshOrCancel); root.addSubview(refresh)
         action.frame = NSRect(x: 426, y: 469, width: 128, height: 28); action.bezelStyle = .rounded; action.target = self; action.action = #selector(download); action.isHidden = true; root.addSubview(action)
     }
-    func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); loadRepository() }
-    func windowWillClose(_ notification: Notification) { generation += 1; request?.cancel(); progress.stopAnimation(nil); refresh.isEnabled = true }
-    @objc private func download() { if let downloadURL { if let url = try? DistributionSource.transportURL(downloadURL) { NSWorkspace.shared.open(url) } } }
+    func show() {
+        showUpdateInFocus()
+        if !updater.sessionInProgress { loadRepository() }
+    }
+    func windowWillClose(_ notification: Notification) {
+        // Closing a check/download cancels it; an installation already handed to Sparkle may finish.
+        if let cancel = cancelUpdate { clearCallbacks(); cancel() }
+        else if let reply = chooseUpdate { clearCallbacks(); reply(.dismiss) }
+    }
+    @objc private func download() {
+        guard let reply = chooseUpdate else { return }
+        chooseUpdate = nil; installRequested = true; action.isHidden = true
+        reply(.install)
+    }
+    @objc private func refreshOrCancel() {
+        if let cancel = cancelUpdate {
+            clearCallbacks(); cancel()
+            setState("已取消更新", "可以随时重新检查。", symbol: "pause.circle", color: .secondaryLabelColor)
+        } else { loadRepository() }
+    }
+    private func clearCallbacks() { cancelUpdate = nil; chooseUpdate = nil }
+    private func busy(_ cancellable: (() -> Void)? = nil) {
+        cancelUpdate = cancellable; action.isHidden = true
+        refresh.title = cancellable == nil ? "重新检查" : "取消"
+        refresh.isEnabled = cancellable != nil
+        progress.isHidden = false; progress.isIndeterminate = true; progress.startAnimation(nil)
+    }
+    private func idle() {
+        clearCallbacks(); progress.stopAnimation(nil); progress.isHidden = true
+        action.isHidden = true; refresh.title = "重新检查"; refresh.isEnabled = true
+    }
     private func setState(_ title: String, _ message: String, symbol: String, color: NSColor) {
         status.stringValue = title; subtitle.stringValue = message
         stateIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); stateIcon.contentTintColor = color
@@ -62,36 +95,102 @@ final class DistributionWindow: NSObject, NSWindowDelegate {
         }
         detail.textStorage?.setAttributedString(result); detail.scrollToBeginningOfDocument(nil)
     }
-    @objc private func loadRepository() {
-        generation += 1; request?.cancel(); downloadURL = nil; action.isHidden = true
-        let token = generation
-        refresh.isEnabled = false; progress.isHidden = false; progress.startAnimation(nil)
-        setState("正在检查更新", "正在获取最新版本信息…", symbol: "arrow.triangle.2.circlepath", color: .secondaryLabelColor)
-        if detail.string.isEmpty { renderNotes("版本信息加载后，更新内容会显示在这里。") }
-        request = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let repo = try PublicRepository(DistributionSource.appRepository)
-                let latest = try await DistributionSource.latest(repo)
-                guard !Task.isCancelled, token == self.generation else { return }
-                let version = try ReleaseVersion(latest.tag_name), current = try ReleaseVersion(self.currentVersion)
-                if version > current {
-                    self.downloadURL = try latest.asset("Vectracast-\(version.description)-macOS-arm64.zip", repository: repo, limit: 500_000_000)
-                    self.setState("新版本 \(version.description) 已就绪", "下载后替换应用，你的设置和插件会保留。", symbol: "arrow.down.circle.fill", color: .controlAccentColor)
-                    self.action.isHidden = false
-                } else if version == current {
-                    self.setState("已是最新版本", "Vectracast \(self.currentVersion) · 无需更新", symbol: "checkmark.circle.fill", color: .systemGreen)
-                } else {
-                    self.setState("你正在使用较新的版本", "当前 \(self.currentVersion) · 最新公开版本 \(version.description)", symbol: "checkmark.circle.fill", color: .systemGreen)
-                }
-                self.notesTitle.stringValue = "版本 \(version.description) · 更新说明"
-                self.renderNotes(latest.body?.isEmpty == false ? latest.body! : "此版本暂无更新说明。")
-            } catch {
-                guard token == self.generation, !Task.isCancelled else { return }
-                self.setState("暂时无法检查更新", "请检查网络后重试。", symbol: "exclamationmark.circle", color: .systemOrange)
-                self.subtitle.toolTip = error.localizedDescription
+    private func loadRepository() {
+        guard !updater.sessionInProgress else { return }
+        installRequested = false
+        do {
+            if !started { try updater.start(); started = true }
+            updater.checkForUpdates()
+        } catch { showUpdaterError(error, acknowledgement: {}) }
+    }
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        // Updates are explicitly initiated from Settings/the menu, with no background telemetry.
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, sendSystemProfile: false))
+    }
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+        busy(cancellation)
+        setState("正在检查更新", "正在获取并验证更新信息…", symbol: "arrow.triangle.2.circlepath", color: .secondaryLabelColor)
+        renderNotes("版本信息加载后，更新内容会显示在这里。")
+    }
+    func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        idle()
+        notesTitle.stringValue = "版本 \(appcastItem.displayVersionString) · 更新说明"
+        renderNotes(appcastItem.itemDescription ?? "此版本暂无更新说明。")
+        if appcastItem.isInformationOnlyUpdate {
+            setState("此版本需要手动安装", "请前往项目的发布页面查看说明。", symbol: "info.circle", color: .secondaryLabelColor)
+            reply(.dismiss); return
+        }
+        setState("新版本 \(appcastItem.displayVersionString) 已就绪", "更新将自动安装并重启，设置和插件会保留。", symbol: "arrow.down.circle.fill", color: .controlAccentColor)
+        chooseUpdate = reply; refresh.isEnabled = false
+        action.title = "更新并重启"; action.isHidden = false
+    }
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
+        renderNotes(String(data: downloadData.data, encoding: .utf8) ?? "无法显示更新说明。")
+    }
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) { renderNotes("暂时无法加载更新说明。") }
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        idle()
+        let value = error as NSError
+        setState("暂无可安装的更新", value.localizedDescription, symbol: "checkmark.circle", color: .secondaryLabelColor)
+        if let latest = value.userInfo[SPULatestAppcastItemFoundKey] as? SUAppcastItem {
+            notesTitle.stringValue = "版本 \(latest.displayVersionString) · 更新说明"
+            renderNotes(latest.itemDescription ?? "此版本暂无更新说明。")
+            if latest.versionString == Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                setState("已是最新版本", "Vectracast \(currentVersion) · 无需更新", symbol: "checkmark.circle.fill", color: .systemGreen)
             }
-            self.refresh.isEnabled = true; self.progress.stopAnimation(nil); self.progress.isHidden = true
+        }
+        acknowledgement()
+    }
+    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        idle(); installRequested = false
+        setState("更新未完成", error.localizedDescription, symbol: "exclamationmark.circle", color: .systemOrange)
+        subtitle.toolTip = (error as NSError).localizedRecoverySuggestion ?? error.localizedDescription
+        acknowledgement()
+    }
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        expectedBytes = 0; receivedBytes = 0; busy(cancellation)
+        setState("正在下载更新", "正在连接下载服务器…", symbol: "arrow.down.circle", color: .controlAccentColor)
+    }
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        expectedBytes = expectedContentLength; updateDownloadProgress()
+    }
+    func showDownloadDidReceiveData(ofLength length: UInt64) {
+        receivedBytes = receivedBytes.addingReportingOverflow(length).overflow ? UInt64.max : receivedBytes + length
+        updateDownloadProgress()
+    }
+    private func updateDownloadProgress() {
+        let downloaded = ByteCountFormatter.string(fromByteCount: Int64(clamping: receivedBytes), countStyle: .file)
+        if expectedBytes > 0 {
+            progress.stopAnimation(nil); progress.isIndeterminate = false; progress.maxValue = 1
+            progress.doubleValue = min(1, Double(receivedBytes) / Double(expectedBytes))
+            let total = ByteCountFormatter.string(fromByteCount: Int64(clamping: expectedBytes), countStyle: .file)
+            subtitle.stringValue = "\(downloaded) / \(total) · \(Int(progress.doubleValue * 100))%"
+        } else { subtitle.stringValue = "已下载 \(downloaded)" }
+    }
+    func showDownloadDidStartExtractingUpdate() {
+        busy()
+        setState("正在准备安装", "验证更新包并解压文件…", symbol: "shippingbox", color: .controlAccentColor)
+    }
+    func showExtractionReceivedProgress(_ value: Double) {
+        progress.stopAnimation(nil); progress.isIndeterminate = false; progress.maxValue = 1
+        progress.doubleValue = value.isFinite ? max(0, min(1, value)) : 0
+    }
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        // The user already chose “更新并重启”; only Sparkle's verified ready state can trigger installation.
+        if installRequested { reply(.install) }
+        else {
+            idle(); chooseUpdate = reply; action.title = "安装并重启"; action.isHidden = false; refresh.isEnabled = false
+            setState("更新已准备好", "安装后将重新打开 Vectracast。", symbol: "checkmark.circle", color: .systemGreen)
         }
     }
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
+        busy()
+        setState("正在安装更新", "Vectracast 即将重新启动…", symbol: "arrow.triangle.2.circlepath", color: .controlAccentColor)
+        if !applicationTerminated { action.title = "重新启动"; action.isHidden = false; chooseUpdate = { choice in if choice == .install { retryTerminatingApplication() } } }
+    }
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        idle(); setState("更新已安装", "可以继续使用 Vectracast。", symbol: "checkmark.circle.fill", color: .systemGreen); acknowledgement()
+    }
+    func dismissUpdateInstallation() { idle(); installRequested = false }
+    func showUpdateInFocus() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
 }
