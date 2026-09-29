@@ -19,7 +19,8 @@ export function validateManifest(m) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(m.version)) throw new Error("Use a numeric major.minor.patch version");
   if (!Array.isArray(m.commands) || !m.commands.length) throw new Error("No commands declared");
   if (typeof m.entry !== "string" || path.isAbsolute(m.entry) || m.entry.split(/[\\/]/).includes("..")) throw new Error("Entry must be inside extension directory");
-  if (!m.permissions || Object.keys(m.permissions).some(k => !["network", "clipboard", "applications", "catalog", "browser"].includes(k))) throw new Error("Unsupported permission");
+  if (!m.permissions || Object.keys(m.permissions).some(k => !["network", "clipboard", "applications", "catalog", "browser", "files"].includes(k))) throw new Error("Unsupported permission");
+  if (m.permissions.files !== undefined && (!Array.isArray(m.permissions.files) || m.permissions.files.some(x=>!["search","open"].includes(x)) || (m.permissions.files.includes("open") && !m.permissions.files.includes("search")))) throw new Error("Invalid files permissions");
   if (m.permissions.applications !== undefined && (!Array.isArray(m.permissions.applications) || m.permissions.applications.some(x=>!["read","open"].includes(x)) || (m.permissions.applications.includes("open") && !m.permissions.applications.includes("read")))) throw new Error("Invalid applications permissions");
   if (m.permissions.clipboard !== undefined && (!Array.isArray(m.permissions.clipboard) || m.permissions.clipboard.some(x => !["write", "history", "history-images", "paste"].includes(x)))) throw new Error("Invalid clipboard permissions");
   if (m.permissions.clipboard?.includes("history-images") && !m.permissions.clipboard.includes("history")) throw new Error("Image history requires history permission");

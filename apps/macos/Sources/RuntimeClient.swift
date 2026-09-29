@@ -45,12 +45,17 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
     private var catalogRequestCount = 0
     func issuedCatalogID(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return !cancelled && catalogIDs.contains(id) }
     func issuedHistoryID(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return !cancelled && historyIDs.contains(id) }
+    private var fileSearch: FileSearch?
+    private var fileURLs: [String: URL] = [:]
+    private var fileSearchCount = 0
+    func fileURL(_ id: String) -> URL? { lock.lock(); defer { lock.unlock() }; return cancelled ? nil : fileURLs[id] }
     private var applicationURLs: [String: URL] = [:]
     init(_ info: InstalledExtension) { self.extensionInfo = info }
 
     func cancel() {
         lock.lock(); cancelled = true; let pending = requests; requests = []; lock.unlock()
         pending.forEach { $0.cancel() }
+        DispatchQueue.main.async { self.fileSearch?.cancel(); self.fileSearch = nil }
     }
     func applicationURL(_ id: String) -> URL? {
         lock.lock(); defer { lock.unlock() }
@@ -106,6 +111,27 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
         if method == "storage.flags" {
             do { reply(jsonString(["value": try ExtensionActionState.shared.flags(extensionInfo.manifest.id)])) }
             catch { reply(jsonString(["error": "无法读取扩展状态"])) }
+            return
+        }
+        if method == "files.search" {
+            guard extensionInfo.manifest.permissions.files?.contains("search") == true else { reply(jsonString(["error": "扩展没有文件搜索权限。"])); return }
+            guard let text = input["query"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 200,
+                  let kind = input["kind"] as? String, FileSearch.kinds.contains(kind), Set(input.keys).isSubset(of: ["query", "kind"]) else { reply(jsonString(["error": "请输入 1–200 字的文件名和有效类型。"])); return }
+            lock.lock(); fileSearchCount += 1; let allowed = fileSearchCount == 1; lock.unlock()
+            guard allowed else { reply(jsonString(["error": "每次查询仅允许一次文件搜索。"])); return }
+            DispatchQueue.main.async {
+                self.lock.lock(); let inactive = self.cancelled; self.lock.unlock()
+                guard !inactive else { reply(jsonString(["error": "查询已取消。"])); return }
+                let search = FileSearch(); self.fileSearch = search
+                search.start(text: text, filter: kind) { entries, limited, timedOut in
+                    self.lock.lock()
+                    guard !self.cancelled else { self.lock.unlock(); reply(jsonString(["error": "查询已取消。"])); return }
+                    self.fileURLs = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.url) })
+                    self.lock.unlock()
+                    reply(jsonString(["value": ["files": entries.map(\.metadata), "limited": limited, "timedOut": timedOut]]))
+                    self.fileSearch = nil
+                }
+            }
             return
         }
         if method == "applications.list" {
@@ -205,12 +231,16 @@ final class RuntimeClient {
                 safe.group = item.group.map { String($0.prefix(60)) }
                 safe.catalogID = item.catalogID.flatMap { broker.issuedCatalogID($0) ? $0 : nil }
                 safe.extensionID = info.manifest.id; safe.applicationPath = nil
+                let fileURL = item.fileID.flatMap { broker.fileURL($0) }
+                safe.fileID = fileURL == nil ? nil : item.fileID
+                safe.filePath = fileURL?.path
                 let applicationURL = item.applicationId.flatMap { broker.applicationURL($0) }
                 safe.applicationId = applicationURL == nil ? nil : item.applicationId
                 safe.applicationPath = applicationURL?.path
                 safe.actions = item.actions.prefix(10).filter { action in
                     guard !action.title.isEmpty, action.title.count <= 120, action.id.count <= 80 else { return false }
                     switch action.type {
+                    case "file.open", "file.reveal": return info.manifest.permissions.files?.contains("open") == true && fileURL != nil && action.text == safe.fileID
                     case "view.detail": return item.preview?.text != nil || item.detail != nil
                     case "catalog.install": return info.manifest.permissions.catalog?.contains("install") == true && safe.catalogID != nil && action.text == safe.catalogID
                     case "catalog.refresh": return info.manifest.permissions.catalog?.contains("read") == true

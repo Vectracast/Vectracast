@@ -30,7 +30,7 @@
 - 命令 ID 与入口导出的命令对应，关键词全局唯一；冲突时拒绝安装或启用。
 - `debounceMs` 为 0–5000；底座对关键词和无关键词入口统一使用至少 200ms 的尾沿防抖，实际等待为 `max(200, debounceMs)`，未填写时为 200ms。连续输入重新计时，较长的插件等待时间（如翻译 500ms）保留；最多 20 个命令。
 - `inputMode` 可选 `keyword`（默认）或 `query`。`query` 允许无需关键词执行，`keywords` 可为空，也可保留如 `calc` 的显式入口。安装界面会说明该扩展可读取主搜索输入；升级新增此入口必须重新接受权限。
-- 权限支持 `network`、`clipboard` 和 `applications`；不支持的权限拒绝安装。`applications` 可声明 `read` / `open`，其中 `open` 必须同时声明 `read`。
+- 权限支持 `network`、`clipboard`、`applications`、`catalog`、`browser` 和 `files`；不支持的权限拒绝安装。`applications` 可声明 `read` / `open`，其中 `open` 必须同时声明 `read`。
 - 网络声明为精确 HTTPS origin，推荐不带末尾斜杠；不支持端口、通配符或重定向。
 - 配置类型 `text`、`secret`、`dropdown`。secret 不会进入普通 preferences。
 - 图标为 SF Symbols 名称，目前不支持外部图片。
@@ -147,3 +147,11 @@ Manifest 的 `permissions.clipboard` 新增 `history`。启用后授权底座后
 - `url.open` 动作：需要 `permissions.browser: ["open"]`，仅用户选择后打开无用户名、密码或自定义端口的 HTTPS URL。
 
 商店插件见 `extensions/plugin-store`。目录格式和发布流程见 [RELEASING.md](RELEASING.md)。现阶段详情不编造作者、下载次数或截图；缺失的发布元数据不显示。
+
+## 文件检索（宿主 0.8.0）
+
+`permissions.files: ["search", "open"]` 声明文件名检索和用户选择后的打开/定位；open 需要 search。`ctx.files.search(query, kind?)` 返回 `{files: FileEntry[], limited: boolean, timedOut: boolean}`，kind 为 all/folder/document/image/audio/video/other，默认 all。每个查询最多调用一次，输入长度 1–200 字；结果最多 150 项，来自用户目录的 Spotlight 文件名索引，不扫描磁盘或读取内容。3 秒后返回已有结果并设置 limited 和 timedOut。类型筛选在索引查询阶段执行。输入含引号或运算符时按字面处理。
+
+条目字段为 `id/name/path/kind/modified/size`，modified 为 Unix 毫秒。路径可用于展示和复制；`file.open`、`file.reveal` 动作必须使用本次查询签发的 id，并在结果设置同值 `fileID`。插件提交的 filePath 会被丢弃，宿主自行解析且在操作时复查权限和路径。隐藏文件、Library、应用包、符号链接和用户目录外文件不提供。查询取消后停止索引查询并作废 ID；不会把查询或路径写入日志。
+
+完整示例见 `extensions/file-search`。旧宿主不支持 files 权限，需更新后安装。

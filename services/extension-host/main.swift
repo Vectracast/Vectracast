@@ -73,6 +73,7 @@ final class Execution: NSObject, RuntimeProtocol {
                   secrets:{get:name=>__rpc('secrets.get',{name})},
                   catalog:{list:()=>__rpc('catalog.list',{})},
                   storage:{flags:()=>__rpc('storage.flags',{})},
+                  files:{search:(query,kind="all")=>__rpc('files.search',{query,kind})},
                   applications:{list:()=>__rpc('applications.list',{})},
                   clipboard:{history:()=>__rpc('clipboard.history',{})},
                   network:{fetch:(url,options={})=>__rpc('network.fetch',{url,...options})},

@@ -742,6 +742,13 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
                 try ExtensionActionState.shared.toggle(extensionID, key: key)
                 updateQuery(immediate: true); focusSearch()
             } catch { footer.stringValue = error.localizedDescription }
+        case "file.open", "file.reveal":
+            guard let extensionID = item.extensionID, let path = item.filePath, action.text == item.fileID,
+                  store.list().contains(where: { $0.enabled && $0.manifest.id == extensionID && $0.manifest.permissions.files?.contains("open") == true }),
+                  let url = FileSearch.allowedURL(URL(fileURLWithPath: path)) else { footer.stringValue = "文件已移动、不可访问或插件已停用"; return }
+            if action.type == "file.reveal" { NSWorkspace.shared.activateFileViewerSelecting([url]); dismiss() }
+            else if NSWorkspace.shared.open(url) { dismiss() }
+            else { footer.stringValue = "无法打开文件，请尝试在 Finder 中显示" }
         case "application.open", "application.reveal", "application.info", "application.contents":
             guard let extensionID = item.extensionID, let path = item.applicationPath,
                   action.text == item.applicationId,

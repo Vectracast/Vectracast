@@ -252,3 +252,23 @@ test('catalog RPC rejects source overrides before network access',()=>{
  good(install('catalog-fixed-source',fixture({source,permissions:{catalog:['read']}}),'--accept-permissions'));
  bad(run('catalog-fixed-source','--query','test.sample','convert','x'),/固定使用 Vectracast.*Vectracast-Plugins/);
 });
+
+test('file search broker denies missing permission, forged IDs/paths and query-time open',()=>{
+ const missing='var Extension={default:{commands:[{id:"convert",query:async ctx=>{await ctx.files.search("report");return {items:[]}}}]}};';
+ good(install('files-denied',fixture({source:missing}),'--accept-permissions'));
+ bad(run('files-denied','--query','test.sample','convert','x'),/文件搜索权限/);
+ const forged='var Extension={default:{commands:[{id:"convert",query:async()=>({items:[{id:"f",title:"forged",fileID:"forged",filePath:"/etc/hosts",actions:[{id:"open",title:"Open",type:"file.open",text:"forged"}]}]})}]}};';
+ good(install('files-forged',fixture({source:forged,permissions:{files:['search','open']}}),'--accept-permissions'));
+ const row=JSON.parse(good(run('files-forged','--query','test.sample','convert','x'))).items[0];
+ assert.deepEqual(row.actions,[]);assert.equal(row.fileID,undefined);assert.equal(row.filePath,undefined);
+ const open='var Extension={default:{commands:[{id:"convert",query:async()=>{await __rpc("files.open",{path:"/etc/hosts"});return {items:[]}}}]}};';
+ good(install('files-open',fixture({source:open,permissions:{files:['search','open']}}),'--accept-permissions'));
+ bad(run('files-open','--query','test.sample','convert','x'),/查询阶段/);
+});
+test('file search plugin runs through XPC with an empty-entry prompt and a bounded missing-file query',async()=>{
+ const p=await pack('extensions/file-search');good(install('files-real',p.output,'--accept-permissions'));
+ const prompt=JSON.parse(good(run('files-real','--query','local.file-search','files',''))).items;
+ assert.match(prompt[0].title,/输入文件名/);
+ const rows=JSON.parse(good(run('files-real','--query','local.file-search','files','vectracast-nonexistent-'+Date.now()))).items;
+ assert.match(rows[0].title,/没有找到|暂未完成/);assert.deepEqual(rows[0].actions,[]);
+});

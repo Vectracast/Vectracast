@@ -13,7 +13,7 @@ struct ExtensionManifest: Codable {
         var isImplicit: Bool { inputMode == "query" }
     }
     struct Permissions: Codable {
-        let network: [String]?; let clipboard: [String]?; let applications: [String]?; let catalog: [String]?; let browser: [String]?
+        let network: [String]?; let clipboard: [String]?; let applications: [String]?; let catalog: [String]?; let browser: [String]?; let files: [String]?
         private struct Key: CodingKey {
             let stringValue: String; let intValue: Int? = nil
             init?(stringValue: String) { self.stringValue = stringValue }
@@ -21,13 +21,14 @@ struct ExtensionManifest: Codable {
         }
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: Key.self)
-            guard container.allKeys.allSatisfy({ ["network", "clipboard", "applications", "catalog", "browser"].contains($0.stringValue) }) else {
+            guard container.allKeys.allSatisfy({ ["network", "clipboard", "applications", "catalog", "browser", "files"].contains($0.stringValue) }) else {
                 throw LauncherError("扩展声明了不支持的权限。")
             }
             network = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "network")!)
             clipboard = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "clipboard")!)
             applications = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "applications")!)
             catalog = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "catalog")!)
+            files = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "files")!)
             browser = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "browser")!)
         }
     }
@@ -74,6 +75,7 @@ struct ExtensionManifest: Codable {
         guard Set(permissions.clipboard ?? []).isSubset(of: ["write", "history", "history-images", "paste"]) else { throw LauncherError("剪贴板权限仅支持 write/history/history-images/paste。") }
         guard permissions.clipboard?.contains("history-images") != true || permissions.clipboard?.contains("history") == true,
               permissions.clipboard?.contains("paste") != true || permissions.clipboard?.contains("write") == true else { throw LauncherError("图片历史需要 history，粘贴需要 write。") }
+        guard Set(permissions.files ?? []).isSubset(of: ["search", "open"]), permissions.files?.contains("open") != true || permissions.files?.contains("search") == true else { throw LauncherError("文件能力仅支持 search/open，open 需要 search。") }
         guard Set(permissions.applications ?? []).isSubset(of: ["read", "open"]), permissions.applications?.contains("open") != true || permissions.applications?.contains("read") == true else { throw LauncherError("应用能力仅支持 read/open，open 需要 read。") }
         guard Set(permissions.catalog ?? []).isSubset(of: ["read", "install"]), permissions.catalog?.contains("install") != true || permissions.catalog?.contains("read") == true,
               Set(permissions.browser ?? []).isSubset(of: ["open"]) else { throw LauncherError("目录能力仅支持 read/install，浏览器能力仅支持 open。") }
@@ -85,6 +87,8 @@ struct ExtensionManifest: Codable {
     }
     var permissionSummary: String {
         var lines: [String] = []
+        if permissions.files?.contains("search") == true { lines.append("搜索用户目录内 Spotlight 已索引文件的名称、路径和元数据（不读取内容）") }
+        if permissions.files?.contains("open") == true { lines.append("打开文件或在 Finder 定位（用户选择后）") }
         if permissions.catalog?.contains("read") == true { lines.append("读取公开插件目录与已安装插件版本") }
         if permissions.catalog?.contains("install") == true { lines.append("请求安装目录中的插件（每次需用户确认权限）") }
         if permissions.browser?.contains("open") == true { lines.append("在浏览器打开 HTTPS 链接（用户选择后）") }
@@ -160,6 +164,8 @@ struct ResultItem: Codable {
     var group: String?
     var catalogID: String?
     var groupHeading: Bool?
+    var fileID: String? = nil
+    var filePath: String? = nil
 
     static func message(_ title: String, _ subtitle: String, icon: String = "info.circle", actions: [ResultAction] = []) -> ResultItem {
         ResultItem(id: "message", title: title, subtitle: subtitle, icon: icon, actions: actions)

@@ -46,7 +46,7 @@ cat > "$PROJECT_DIR/build/extension-host.entitlements" <<'PLIST'
 PLIST
 mkdir -p "$APP_DIR/Contents/Resources/Documentation"
 cp -R "$PROJECT_DIR/docs/developer" "$PROJECT_DIR/docs/architecture" "$PROJECT_DIR/docs/platform" "$APP_DIR/Contents/Resources/Documentation/"
-for extension in applications calculator text-tools youdao clipboard-history plugin-store; do
+for extension in applications calculator text-tools youdao clipboard-history plugin-store file-search; do
   mkdir -p "$APP_DIR/Contents/Resources/extensions/$extension"
   if [ -f "$PROJECT_DIR/extensions/$extension/README.md" ]; then
     cp "$PROJECT_DIR/extensions/$extension/README.md" "$APP_DIR/Contents/Resources/extensions/$extension/README.md"

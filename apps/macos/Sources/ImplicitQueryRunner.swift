@@ -29,7 +29,7 @@ final class ImplicitQueryRunner {
                     guard let self, self.generation == token else { return }
                     if let items = try? result.get() {
                         batches[index] = items.map { item in
-                            ResultItem(id: "implicit/\(info.manifest.id)/\(command.id)/\(item.id)", title: item.title, subtitle: item.subtitle, icon: item.icon, actions: item.actions, detail: item.detail, applicationPath: item.applicationPath, applicationId: item.applicationId, extensionID: item.extensionID)
+                            ResultItem(id: "implicit/\(info.manifest.id)/\(command.id)/\(item.id)", title: item.title, subtitle: item.subtitle, icon: item.icon, actions: item.actions, detail: item.detail, applicationPath: item.applicationPath, applicationId: item.applicationId, extensionID: item.extensionID, fileID: item.fileID, filePath: item.filePath)
                         }
                     }
                     remaining -= 1; update(batches.flatMap { $0 }, remaining == 0)
