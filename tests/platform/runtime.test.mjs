@@ -130,12 +130,12 @@ test('CLI creates a project and dev watcher reloads edited source',async()=>{
  const cli=path.resolve('packages/cli/bin/platform.mjs'); const dir=path.join(root,'created-extension');
  const create=spawnSync(process.execPath,[cli,'create',dir],{encoding:'utf8'});good(create);
  const manifestPath=path.join(dir,'extension.json');const manifest=JSON.parse(fs.readFileSync(manifestPath));manifest.commands[0].keywords=['fresh'];fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+ const entry=path.join(dir,'src/index.ts');const source=fs.readFileSync(entry,'utf8');
  const child=spawn(process.execPath,[cli,'dev',dir,'--accept-permissions'],{env:{...process.env,LAUNCHER_HOME:path.join(root,'dev')},stdio:['ignore','pipe','pipe']});
- let output='';child.stdout.on('data',x=>{output+=x});child.stderr.on('data',x=>{output+=x});
+ let output='',edited=false;child.stdout.on('data',x=>{output+=x;if(!edited&&output.includes('Reloaded.')){edited=true;fs.writeFileSync(entry,source.replaceAll('query.toLocaleUpperCase()','"RELOADED"'));}});child.stderr.on('data',x=>{output+=x});
  const waitFor=async(fn)=>{const end=Date.now()+10000;while(!fn()&&Date.now()<end)await new Promise(r=>setTimeout(r,100));assert.ok(fn(),output)};
  try {
-  await waitFor(()=>output.includes('Reloaded.'));
-  const entry=path.join(dir,'src/index.ts');const source=fs.readFileSync(entry,'utf8');fs.writeFileSync(entry,source.replaceAll('query.toLocaleUpperCase()','"RELOADED"'));
+  await waitFor(()=>edited);
   await waitFor(()=>(output.match(/Reloaded\./g)||[]).length>=2);
   const rows=JSON.parse(good(run('dev','--query',manifest.id,'transform','hello'))).items;assert.equal(rows[0].title,'RELOADED');
   const prefFile=path.join(root,'dev','preferences.json');const prefs=JSON.parse(good(run('dev','--preferences')));

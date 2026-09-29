@@ -127,13 +127,14 @@ async function main() {
       finally { building = false; if (queued) { queued = false; void rebuild(); } }
     };
     try { autoReload = JSON.parse(await fs.readFile(path.join(home, 'preferences.json'), 'utf8')).developerAutoReload !== false; } catch {}
-    await rebuild();
     let debounce;
+    // Start watching before the first build can announce readiness; immediate edits must not be lost.
     const watcher = watch(dir, { recursive: true }, (_event, file) => {
-      if (!file || file.startsWith("dist/") || file.startsWith("node_modules/") || file.startsWith(".git/")) return;
+      if (!file || ["dist", "node_modules", ".git"].some(name => file === name || file.startsWith(name + "/"))) return;
       dirty = true;
       clearTimeout(debounce); debounce = setTimeout(() => { if (autoReload) void rebuild(); else void status('paused', '自动重建已暂停；启用后将处理待更新的源码。'); }, 200);
     });
+    await rebuild();
     const preferencesTimer = setInterval(async () => {
       try {
         const values = JSON.parse(await fs.readFile(path.join(home, 'preferences.json'), 'utf8'));
