@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import ImageIO
 
 struct LauncherError: LocalizedError {
     let message: String
@@ -9,7 +10,7 @@ struct LauncherError: LocalizedError {
 
 struct ExtensionManifest: Codable {
     struct Filter: Codable { let id: String; let title: String }
-    struct Command: Codable { let id: String; let title: String; let keywords: [String]; let debounceMs: Int?; let inputMode: String?; let acceptsEmptyQuery: Bool?; let presentation: String?; let filters: [Filter]?; var searchPlaceholder: String? = nil
+    struct Command: Codable { let id: String; let title: String; let keywords: [String]; let debounceMs: Int?; let inputMode: String?; let acceptsEmptyQuery: Bool?; let presentation: String?; let filters: [Filter]?; var searchPlaceholder: String? = nil; let icon: String?
         var isImplicit: Bool { inputMode == "query" }
     }
     struct Permissions: Codable {
@@ -54,11 +55,13 @@ struct ExtensionManifest: Codable {
         guard manifestVersion == 1, runtime == "standard-js", sdk == "0.1" else { throw LauncherError("扩展需要不受支持的运行时或 SDK 版本。") }
         guard matches(id, "^[a-z][a-z0-9-]{0,40}\\.[a-z][a-z0-9-]{0,50}$"),
               matches(version, "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"),
-              !name.isEmpty, name.count <= 80, commands.count > 0, commands.count <= 20 else { throw LauncherError("扩展标识、版本或命令列表无效。") }
+              !name.isEmpty, name.count <= 80, commands.count > 0, commands.count <= 20,
+              Self.validIconReference(icon) else { throw LauncherError("扩展标识、版本、图标或命令列表无效。") }
         var ids = Set<String>(); var aliases = Set<String>()
         for command in commands {
             guard matches(command.id, "^[a-z][a-z0-9-]{0,50}$"), ids.insert(command.id).inserted,
-                  (command.isImplicit || !command.keywords.isEmpty), [nil, "keyword", "query"].contains(command.inputMode), (0...5000).contains(command.debounceMs ?? 0) else { throw LauncherError("命令声明无效。") }
+                  (command.isImplicit || !command.keywords.isEmpty), [nil, "keyword", "query"].contains(command.inputMode), (0...5000).contains(command.debounceMs ?? 0),
+                  command.icon.map(Self.validIconReference) ?? true else { throw LauncherError("命令声明无效。") }
             guard [nil, "detail", "list"].contains(command.presentation), (command.searchPlaceholder?.count ?? 0) <= 80, (command.filters?.count ?? 0) <= 10,
                   Set((command.filters ?? []).map(\.id)).count == (command.filters?.count ?? 0),
                   (command.filters ?? []).allSatisfy({ $0.id.count <= 30 && !$0.title.isEmpty && $0.title.count <= 30 }) else { throw LauncherError("展示配置无效。") }
@@ -85,6 +88,16 @@ struct ExtensionManifest: Codable {
                   ["text", "secret", "dropdown"].contains(pref.type), pref.type != "dropdown" || !(pref.options ?? []).isEmpty else { throw LauncherError("偏好字段无效。") }
         }
     }
+    static func validIconReference(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 120 else { return false }
+        if !value.hasPrefix("assets/") { return value.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$", options: .regularExpression) != nil }
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 2, parts[0] == "assets",
+              parts.dropFirst().allSatisfy({ part in
+                  part != "." && part != ".." && part.range(of: "^[A-Za-z0-9_-][A-Za-z0-9._-]*$", options: .regularExpression) != nil
+              }) else { return false }
+        return ["png", "jpg", "jpeg"].contains(URL(fileURLWithPath: value).pathExtension.lowercased())
+    }
     var permissionSummary: String {
         var lines: [String] = []
         if permissions.files?.contains("search") == true { lines.append("搜索用户目录内 Spotlight 已索引文件的名称、路径和元数据（不读取内容）") }
@@ -108,10 +121,36 @@ struct ExtensionPackage: Codable {
     let manifest: ExtensionManifest
     let source: String
     let sha256: String
+    var resources: [String: String]? = nil
+    var resourcesSha256: String? = nil
     func validate() throws {
         try manifest.validate()
         guard format == 1, source.utf8.count < 2_000_000,
               SHA256.hash(data: Data(source.utf8)).map({ String(format: "%02x", $0) }).joined() == sha256 else { throw LauncherError("安装包损坏或超过大小限制。") }
+        let images = resources ?? [:]
+        let references = Set(([manifest.icon] + manifest.commands.compactMap(\.icon)).filter { $0.hasPrefix("assets/") })
+        guard images.count <= 24, references == Set(images.keys) else { throw LauncherError("扩展包中的图标资源缺失或包含未引用文件。") }
+        var total = 0
+        for (name, encoded) in images {
+            guard ExtensionManifest.validIconReference(name), encoded.utf8.count <= 700_000,
+                  let data = Data(base64Encoded: encoded), data.base64EncodedString() == encoded, !data.isEmpty, data.count <= 512_000 else { throw LauncherError("扩展图标资源无效或过大。") }
+            total += data.count
+            guard total <= 1_500_000 else { throw LauncherError("扩展图标资源总大小超过 1.5 MB。") }
+            let lowerName = name.lowercased()
+            let png = lowerName.hasSuffix(".png") && data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10])
+            let jpeg = (lowerName.hasSuffix(".jpg") || lowerName.hasSuffix(".jpeg")) && data.starts(with: [255, 216, 255])
+            guard png || jpeg,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) == 1,
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width > 0, height > 0, width <= 1024, height <= 1024 else { throw LauncherError("扩展图标必须是有效且不超过 1024 × 1024 的 PNG/JPEG 图片。") }
+        }
+        if !images.isEmpty {
+            let canonical = images.keys.sorted().map { "\($0)\0\(images[$0]!)\n" }.joined()
+            let digest = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+            guard resourcesSha256 == digest else { throw LauncherError("扩展图标资源校验失败。") }
+        } else if resourcesSha256 != nil { throw LauncherError("扩展图标资源校验信息无效。") }
     }
 }
 
@@ -122,6 +161,7 @@ struct InstalledExtension {
     let previous: String?
     let preferences: [String: String]
     let development: Bool
+    var resources: [String: String] = [:]
 }
 
 struct ResultAction: Codable {

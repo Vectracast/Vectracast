@@ -2,7 +2,7 @@
 export interface Action { id: string; title: string; type: "file.open" | "file.reveal" | "view.detail" | "catalog.install" | "catalog.refresh" | "url.open" | "clipboard.copy" | "application.open" | "application.reveal" | "application.info" | "application.contents" | "storage.toggle" | "clipboard.history.remove" | "clipboard.history.clear" | "clipboard.history.copy" | "clipboard.history.paste"; text: string; icon?: string; shortcut?: { key: string; modifiers: ("command" | "shift" | "option" | "control")[] }; section?: string }
 export interface ClipboardHistoryEntry { id: string; text: string; source: string; timestamp: number; kind?: "text" | "image"; width?: number; height?: number; byteCount?: number; sourceBundleID?: string }
 export interface Application { id: string; name: string; bundleIdentifier: string; searchTerms: string[]; urlSchemes?: string[]; documentTypes?: string[] }
-export interface ResultItem { id: string; title: string; subtitle?: string; icon?: string; detail?: string; preview?: { text?: string; historyImageID?: string }; metadata?: { label: string; value: string }[]; group?: string; fileID?: string; catalogID?: string; applicationId?: string; actions: Action[] }
+export interface ResultItem { id: string; title: string; subtitle?: string; /** SF Symbol name or packaged assets/... PNG/JPEG resource path. */ icon?: string; detail?: string; preview?: { text?: string; historyImageID?: string }; metadata?: { label: string; value: string }[]; group?: string; fileID?: string; catalogID?: string; applicationId?: string; actions: Action[] }
 export interface QueryContext {
   files: { search(query: string, kind?: string): Promise<{ files: FileEntry[]; limited: boolean; timedOut: boolean }> };
   catalog: { list(): Promise<CatalogSnapshot> };
@@ -25,6 +25,8 @@ export interface CommandManifest {
   id: string;
   title: string;
   keywords: string[];
+  /** SF Symbol name or packaged assets/... PNG/JPEG resource path. */
+  icon?: string;
   inputMode?: "keyword" | "query";
   /** Run an exact keyword immediately, including when no query follows it. */
   acceptsEmptyQuery?: boolean;

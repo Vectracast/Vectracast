@@ -654,7 +654,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
             value = ((info.manifest.commands.contains(where: \.isImplicit) ? ["直接输入"] : []) + keywords).joined(separator: " · ")
         case "hotkey": value = info.manifest.commands.compactMap { prefs.values.commandShortcuts[info.manifest.id + "/" + $0.id]?.label }.first ?? "—"
         default:
-            let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 20, height: 20)); icon.image = NSImage(systemSymbolName: info.manifest.icon, accessibilityDescription: nil); icon.contentTintColor = info.manifest.id == "local.youdao" ? .systemRed : .systemBlue; cell.addSubview(icon)
+            let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 20, height: 20)); icon.image = ExtensionIcon.image(info.manifest.icon, extensionID: info.manifest.id, resources: info.resources, fallback: "puzzlepiece.extension"); icon.contentTintColor = info.manifest.icon.hasPrefix("assets/") ? nil : (info.manifest.id == "local.youdao" ? .systemRed : .systemBlue); cell.addSubview(icon)
             let text = NSTextField(labelWithString: info.manifest.name); text.font = .systemFont(ofSize: 13, weight: .medium); let hasUpdate = catalogSnapshot?.update(for: info) != nil
             text.frame = NSRect(x: 39, y: 10, width: (tableColumn?.width ?? 210) - (hasUpdate ? 101 : 47), height: 20); text.lineBreakMode = .byTruncatingTail; cell.addSubview(text)
             if hasUpdate {

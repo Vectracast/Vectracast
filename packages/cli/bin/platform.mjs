@@ -13,12 +13,50 @@ export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.u
 const appBinary = path.join(projectRoot, "build/Vectracast.app/Contents/MacOS/Vectracast");
 const sdkPath = path.join(projectRoot, "packages/sdk/src/index.ts");
 
+function validIconReference(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 120) return false;
+  if (!value.startsWith("assets/")) return /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(value);
+  const segments = value.split("/");
+  return segments.length >= 2 && segments.every((part, index) => index === 0
+    ? part === "assets"
+    : part !== "." && part !== ".." && /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(part)) && /\.(png|jpe?g)$/i.test(value);
+}
+
+function resourceDigest(resources) {
+  return createHash("sha256").update(Object.keys(resources).sort().map(key => `${key}\0${resources[key]}\n`).join("")).digest("hex");
+}
+
+async function collectIconResources(directory, manifest) {
+  const references = new Set([manifest.icon, ...manifest.commands.map(command => command.icon)].filter(value => value?.startsWith("assets/")));
+  if (references.size > 24) throw new Error("An extension may package at most 24 icon resources");
+  const root = await fs.realpath(directory);
+  const resources = {};
+  let total = 0;
+  for (const reference of references) {
+    if (!validIconReference(reference)) throw new Error(`Invalid icon resource path: ${reference}`);
+    const resolved = await fs.realpath(path.join(root, reference));
+    if (!resolved.startsWith(root + path.sep)) throw new Error(`Icon resource escapes extension directory: ${reference}`);
+    const stat = await fs.stat(resolved);
+    if (!stat.isFile() || stat.size < 1 || stat.size > 512_000) throw new Error(`Icon resource must be a file no larger than 512 KB: ${reference}`);
+    const data = await fs.readFile(resolved);
+    const png = data.length >= 24 && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const jpeg = data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+    if ((/\.png$/i.test(reference) && !png) || (/\.jpe?g$/i.test(reference) && !jpeg)) throw new Error(`Icon resource contents do not match its PNG/JPEG extension: ${reference}`);
+    if (png && (data.readUInt32BE(16) > 1024 || data.readUInt32BE(20) > 1024)) throw new Error(`Icon resource dimensions may not exceed 1024 × 1024: ${reference}`);
+    total += data.length;
+    if (total > 1_500_000) throw new Error("Packaged icon resources exceed 1.5 MB");
+    resources[reference] = data.toString("base64");
+  }
+  return resources;
+}
+
 export function validateManifest(m) {
   if (m.manifestVersion !== 1 || m.runtime !== "standard-js" || m.sdk !== "0.1") throw new Error("Unsupported manifest, runtime, or SDK version");
   if (!/^[a-z][a-z0-9-]{0,40}\.[a-z][a-z0-9-]{0,50}$/.test(m.id)) throw new Error("Invalid extension id");
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(m.version)) throw new Error("Use a numeric major.minor.patch version");
   if (!Array.isArray(m.commands) || !m.commands.length) throw new Error("No commands declared");
   if (typeof m.entry !== "string" || path.isAbsolute(m.entry) || m.entry.split(/[\\/]/).includes("..")) throw new Error("Entry must be inside extension directory");
+  if (!validIconReference(m.icon)) throw new Error("Extension icon must be an SF Symbol name or a PNG/JPEG path under assets/");
   if (!m.permissions || Object.keys(m.permissions).some(k => !["network", "clipboard", "applications", "catalog", "browser", "files"].includes(k))) throw new Error("Unsupported permission");
   if (m.permissions.files !== undefined && (!Array.isArray(m.permissions.files) || m.permissions.files.some(x=>!["search","open"].includes(x)) || (m.permissions.files.includes("open") && !m.permissions.files.includes("search")))) throw new Error("Invalid files permissions");
   if (m.permissions.applications !== undefined && (!Array.isArray(m.permissions.applications) || m.permissions.applications.some(x=>!["read","open"].includes(x)) || (m.permissions.applications.includes("open") && !m.permissions.applications.includes("read")))) throw new Error("Invalid applications permissions");
@@ -36,6 +74,7 @@ export function validateManifest(m) {
     if (c.filters !== undefined && (!Array.isArray(c.filters) || c.filters.length > 10 || c.filters.some(f => typeof f.id !== "string" || f.id.length > 30 || typeof f.title !== "string" || !f.title.length || f.title.length > 30) || new Set(c.filters.map(f => f.id)).size !== c.filters.length)) throw new Error("Invalid filters");
     if (c.acceptsEmptyQuery !== undefined && typeof c.acceptsEmptyQuery !== "boolean") throw new Error("Invalid acceptsEmptyQuery");
     if (![undefined, "keyword", "query"].includes(c.inputMode)) throw new Error("Invalid command inputMode");
+    if (c.icon !== undefined && !validIconReference(c.icon)) throw new Error("Command icon must be an SF Symbol name or a PNG/JPEG path under assets/");
     if (!Array.isArray(c.keywords) || (!c.keywords.length && c.inputMode !== "query")) throw new Error("Command needs a keyword or query inputMode");
     if (c.debounceMs !== undefined && (!Number.isInteger(c.debounceMs) || c.debounceMs < 0 || c.debounceMs > 5000)) throw new Error("Invalid debounceMs");
     for (const k of c.keywords) {
@@ -65,7 +104,8 @@ export async function pack(directory, { release = false } = {}) {
   });
   const source = result.outputFiles[0].text;
   if (Buffer.byteLength(source) > 2_000_000) throw new Error("Bundle exceeds 2 MB");
-  const pkg = { format: 1, manifest, source, sha256: createHash("sha256").update(source).digest("hex") };
+  const resources = await collectIconResources(dir, manifest);
+  const pkg = { format: 1, manifest, source, sha256: createHash("sha256").update(source).digest("hex"), ...(Object.keys(resources).length ? { resources, resourcesSha256: resourceDigest(resources) } : {}) };
   const output = path.join(dir, "dist", `${manifest.id}-${manifest.version}.launcher-extension`);
   await fs.mkdir(path.dirname(output), { recursive: true });
   await fs.writeFile(output, JSON.stringify(pkg));

@@ -111,6 +111,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     private var catalogObserver: NSObjectProtocol?
     private var resultsPending = false
     private var queryGeneration = UUID()
+    private var iconExtensions: [String: InstalledExtension] = [:]
     private var previousApplication: NSRunningApplication?
     private var revision = ""
     private var refreshTimer: Timer?
@@ -567,7 +568,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             setResults([ResultItem(id: "welcome", title: "Vectracast 已就绪", subtitle: nil, icon: "arrow.up.forward.square.fill", actions: [ResultAction(id: "settings", title: "打开设置", type: "settings.open", text: nil)])], section: "")
             return
         }
-        let extensions = store.list().filter(\.enabled)
+        let installedExtensions = store.list()
+        iconExtensions = Dictionary(uniqueKeysWithValues: installedExtensions.map { ($0.manifest.id, $0) })
+        let extensions = installedExtensions.filter(\.enabled)
         if let current = browserCommand, !extensions.contains(where: { $0.manifest.id == current.0.manifest.id }) { exitDetail(); return }
         let active = browserCommand.flatMap { current in extensions.first(where: { $0.manifest.id == current.0.manifest.id }).flatMap { info in info.manifest.commands.first(where: { $0.id == current.1.id }).map { (info, $0) } } }
         let commands = extensions.flatMap { info in info.manifest.commands.map { (info, $0) } }
@@ -578,8 +581,8 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         if let matched = active ?? explicitCommand ?? resolved {
             let (info, command) = matched
             currentExtension = info.manifest.id
-            let query = isDetail ? raw : (explicitCommand != nil ? "" : entry?.query ?? "")
-            if !isDetail && command.presentation != nil { enterDetail(info, command, query: query); return }
+            let query = isDetail ? raw : (explicitCommand != nil ? (command.isImplicit ? raw : "") : entry?.query ?? "")
+            if !isDetail && explicitCommand == nil && command.presentation != nil { enterDetail(info, command, query: query); return }
             let preferencesAction = ResultAction(id: "settings", title: "配置扩展", type: "settings.open", text: info.manifest.id)
             if query.isEmpty && command.acceptsEmptyQuery != true {
                 let prefix = entry != nil ? trimmed : (prefs.keywords(info, command).first ?? command.id)
@@ -616,16 +619,14 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             items.append(ResultItem(id: "extensions", title: "设置", subtitle: "Vectracast", icon: "gearshape.fill", actions: [ResultAction(id: "manage", title: "打开", type: "settings.open", text: nil)]))
         }
         footer.stringValue = "Vectracast"
-        let baseItems = items
-        let placeholder = ResultItem.message("没有匹配结果", "尝试其他输入，或在扩展管理中启用相关功能。", icon: "magnifyingglass")
-        beginWaiting()
-        implicitQueries.query(extensions, input: raw) { [weak self] extensionItems, finished in
-            guard let self, self.queryGeneration == generation, self.search.stringValue == raw else { return }
-            guard finished || !extensionItems.isEmpty else { return }
-            let combined = extensionItems + baseItems
-            self.setResults(combined.isEmpty ? [placeholder] : combined, section: "结果")
-            self.footer.stringValue = extensionItems.isEmpty ? "Vectracast" : "扩展结果 · ↑↓ 选择 · ↵ 执行动作"
+        guard items.isEmpty else { setResults(items, section: "结果"); return }
+        let fallbackEntries = QueryFallback.entries(for: extensions, input: trimmed)
+        guard !fallbackEntries.isEmpty else {
+            setResults([.message("没有匹配结果", "尝试其他输入，或在扩展管理中启用相关功能。", icon: "magnifyingglass")], section: "结果")
+            return
         }
+        setResults(fallbackEntries, section: "可用扩展")
+        footer.stringValue = "选择扩展 · ↵ 使用当前输入"
     }
     func numberOfRows(in tableView: NSTableView) -> Int { results.count }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { ResultRowView() }
@@ -638,11 +639,12 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         }
         let view = NSTableCellView()
         let image = NSImageView()
-        image.image = item.applicationPath.map { NSWorkspace.shared.icon(forFile: $0) } ?? NSImage(systemSymbolName: item.icon ?? "text.bubble", accessibilityDescription: nil)
+        let extensionInfo = item.extensionID.flatMap { iconExtensions[$0] }
+        image.image = item.applicationPath.map { NSWorkspace.shared.icon(forFile: $0) } ?? ExtensionIcon.image(item.icon, extensionID: item.extensionID, resources: extensionInfo?.resources, fallback: "text.bubble")
         if isDetail, let id = item.preview?.historyImageID, let extensionID = item.extensionID {
             ClipboardHistory.shared.loadImage(extensionID, entryID: id, maxPixels: 80) { [weak image] loaded in image?.image = loaded }
         }
-        image.contentTintColor = (item.applicationPath != nil || item.preview?.historyImageID != nil) ? nil : (item.extensionID == "local.youdao" ? .systemRed : .secondaryLabelColor)
+            image.contentTintColor = (item.applicationPath != nil || item.preview?.historyImageID != nil || item.icon?.hasPrefix("assets/") == true) ? nil : (item.extensionID == "local.youdao" ? .systemRed : .secondaryLabelColor)
         image.translatesAutoresizingMaskIntoConstraints = false
         let fontSize: CGFloat = prefs.values.textSize == "large" ? 17 : 15
         let title = NSTextField(labelWithString: item.title)
@@ -746,6 +748,11 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
                 search.stringValue = (prefs.keywords(info, command).first ?? command.id) + " "
                 updateQuery(immediate: true, explicitCommand: (info, command)); focusSearch()
             }
+        case "command.input":
+            guard let info = store.list().first(where: { $0.enabled && $0.manifest.id == item.extensionID }),
+                  let command = info.manifest.commands.first(where: { $0.id == action.text }), command.isImplicit else { return }
+            browserCommand = nil; pageItem = nil; selectedFilter = ""
+            updateQuery(immediate: true, explicitCommand: (info, command)); focusSearch()
         case "input.set": search.stringValue = action.text ?? ""; panel.makeFirstResponder(search); updateQuery(); (search.currentEditor() as? NSTextView)?.setSelectedRange(NSRange(location: search.stringValue.utf16.count, length: 0))
         case "settings.open": onSettings?(action.text)
         case "storage.toggle":

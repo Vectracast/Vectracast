@@ -44,7 +44,7 @@ final class ExtensionStore {
         return rows.compactMap { row in
             guard let raw = row["package"], let package = try? JSONDecoder().decode(ExtensionPackage.self, from: Data(raw.utf8)) else { return nil }
             return InstalledExtension(manifest: package.manifest, source: package.source, enabled: row["enabled"] == "1", previous: row["previous"],
-                                      preferences: (try? JSONDecoder().decode([String: String].self, from: Data((row["preferences"] ?? "{}").utf8))) ?? [:], development: row["development"] == "1")
+                                      preferences: (try? JSONDecoder().decode([String: String].self, from: Data((row["preferences"] ?? "{}").utf8))) ?? [:], development: row["development"] == "1", resources: package.resources ?? [:])
         }
     }
 
