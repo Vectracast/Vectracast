@@ -23,4 +23,6 @@ for (const key of ["appRepository", "pluginRepository"]) {
 }
 if (process.env.CI && (!config.appRepository || !config.pluginRepository))
   throw Error("Configure both public repositories before publishing.");
+if (config.apiBaseURL !== "https://vectracast-api.fix030.com")
+  throw Error("Distribution API is fixed to https://vectracast-api.fix030.com");
 await fs.writeFile(process.argv[2], JSON.stringify(config, null, 2) + "\n");

@@ -41,7 +41,7 @@ final class DistributionWindow: NSObject, NSWindowDelegate {
     }
     func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); loadRepository() }
     func windowWillClose(_ notification: Notification) { generation += 1; request?.cancel(); progress.stopAnimation(nil); refresh.isEnabled = true }
-    @objc private func download() { if let downloadURL { NSWorkspace.shared.open(downloadURL) } }
+    @objc private func download() { if let downloadURL { if let url = try? DistributionSource.transportURL(downloadURL) { NSWorkspace.shared.open(url) } } }
     private func setState(_ title: String, _ message: String, symbol: String, color: NSColor) {
         status.stringValue = title; subtitle.stringValue = message
         stateIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); stateIcon.contentTintColor = color
@@ -66,7 +66,7 @@ final class DistributionWindow: NSObject, NSWindowDelegate {
         generation += 1; request?.cancel(); downloadURL = nil; action.isHidden = true
         let token = generation
         refresh.isEnabled = false; progress.isHidden = false; progress.startAnimation(nil)
-        setState("正在检查更新", "正在连接 GitHub，获取最新版本信息…", symbol: "arrow.triangle.2.circlepath", color: .secondaryLabelColor)
+        setState("正在检查更新", "正在获取最新版本信息…", symbol: "arrow.triangle.2.circlepath", color: .secondaryLabelColor)
         if detail.string.isEmpty { renderNotes("版本信息加载后，更新内容会显示在这里。") }
         request = Task { @MainActor [weak self] in
             guard let self else { return }

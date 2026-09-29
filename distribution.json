@@ -1,4 +1,5 @@
 {
   "appRepository": "Vectracast/Vectracast",
-  "pluginRepository": "Vectracast/Vectracast-Plugins"
+  "pluginRepository": "Vectracast/Vectracast-Plugins",
+  "apiBaseURL": "https://vectracast-api.fix030.com"
 }

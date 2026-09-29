@@ -7,7 +7,7 @@ Vectracast 使用两个 Public 仓库。主仓库为 `Vectracast/Vectracast`，�
 | `Vectracast` | macOS 应用、SDK、CLI、测试和开发文档 | macOS ZIP、SHA-256 校验文件 |
 | `Vectracast-Plugins` | 插件源码、说明和插件发布流程 | `index.json`、全部插件安装包、校验文件 |
 
-主仓库通过 `extensions/` Git submodule 固定一个插件仓库提交。应用发现插件时读取插件仓库的最新正式 Release，不依赖本地 submodule 是否已更新。因此发布新插件不要求重新发布应用。
+主仓库通过 `extensions/` Git submodule 固定一个插件仓库提交。数据服务同步插件仓库的最新正式 Release，应用通过服务读取目录，不依赖本地 submodule 是否已更新。因此发布新插件不要求重新发布应用。
 
 ## 1. 在 GitHub 创建仓库
 
@@ -52,7 +52,8 @@ git submodule add -b main https://github.com/Vectracast/Vectracast-Plugins.git e
 ```json
 {
   "appRepository": "Vectracast/Vectracast",
-  "pluginRepository": "Vectracast/Vectracast-Plugins"
+  "pluginRepository": "Vectracast/Vectracast-Plugins",
+  "apiBaseURL": "https://vectracast-api.fix030.com"
 }
 ```
 
@@ -106,7 +107,7 @@ Actions 在 Apple Silicon macOS runner 上检查类型、构建并运行测试�
 
 如果上传期间失败，可到 Releases 检查留下的草稿；客户端只读取正式 Release。修复失败后处理草稿再重跑，不要改写已公开发行版的附件。
 
-应用的「关于 → 检查更新」和菜单栏「检查更新…」会读取最新正式 Release，展示版本号和 `RELEASE_NOTES.md` 对应的更新内容。点击下载直接打开该仓库的公开 ZIP 地址。此版本下载后由用户手动替换应用，不在后台覆盖正在运行的程序。
+应用的「关于 → 检查更新」和菜单栏「检查更新…」通过数据服务读取最新正式 Release，展示版本号和 `RELEASE_NOTES.md` 对应的更新内容。点击下载打开数据服务的公开 ZIP 地址，优先下载已校验的缓存。服务器获取安装包超时或网络不可用时，浏览器会转到同一正式版本的 GitHub 官方附件地址。下载后由用户手动替换应用，不在后台覆盖正在运行的程序。
 
 当前工作流使用 ad-hoc 签名，尚未配置 Developer ID 签名和 Apple 公证。下载的应用可能受到 Gatekeeper 限制；正式面向普通用户发行前应接入签名与公证流程。不要通过关闭系统安全机制处理这个问题。
 
@@ -136,7 +137,7 @@ git push
 
 ## 配置与验证边界
 
-检查更新直接读取 `Vectracast/Vectracast`，插件目录读取 `Vectracast/Vectracast-Plugins`。两处均不提供来源输入项；旧的仓库偏好值不参与请求。
+数据服务从 `Vectracast/Vectracast` 同步应用版本，从 `Vectracast/Vectracast-Plugins` 同步插件目录。客户端固定请求 `https://vectracast-api.fix030.com`，不提供来源输入项；旧的仓库偏好值不参与请求。首次切换前必须完成服务器 HTTPS、目录及插件包下载验证，再发布客户端版本。
 
 本地构建、包校验测试和打包成功不等于线上发布成功。首次发布后应确认：两个 Actions 成功、Release 附件齐全、干净数据目录可以发现并安装插件、旧版本应用能读取新版本及更新内容。
 

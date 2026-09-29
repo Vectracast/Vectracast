@@ -83,6 +83,23 @@ assert(DistributionSource.repository("appRepository") == "Vectracast/Vectracast"
 UserDefaults.standard.removeObject(forKey: "distribution.appRepository")
 try DistributionSource.validateCatalogRequest([:])
 rejects { try DistributionSource.validateCatalogRequest(["repository":"attacker/other"]) }
+let api = "https://vectracast-api.fix030.com"
+for (kind, name) in [("app", "Vectracast/Vectracast"), ("plugins", "Vectracast/Vectracast-Plugins")] {
+ let latest = try DistributionSource.transportURL(PublicRepository(name).latestURL)
+ assert(latest.absoluteString == api + "/v1/releases/" + kind + "/latest")
+ let asset = try DistributionSource.transportURL(URL(string: "https://github.com/" + name + "/releases/download/v1.0.0/index.json")!)
+ assert(asset.absoluteString == api + "/v1/assets/" + kind + "/v1.0.0/index.json")
+ let unchanged = try DistributionSource.transportURL(asset); assert(unchanged == asset)
+}
+for address in [
+ "https://api.github.com/repos/attacker/repo/releases/latest",
+ "https://github.com/Vectracast/Vectracast-Plugins/releases/download/v1.0.0/index.json?source=other",
+ "https://github.com/Vectracast/Vectracast-Plugins/releases/download/v1.0.0/nested/index.json",
+ "http://vectracast-api.fix030.com/v1/releases/plugins/latest",
+ "https://vectracast-api.fix030.com.evil.example/v1/releases/plugins/latest",
+ "https://user:pass@vectracast-api.fix030.com/v1/releases/plugins/latest",
+ "https://vectracast-api.fix030.com:8080/v1/releases/plugins/latest"
+] { rejects { _ = try DistributionSource.transportURL(URL(string: address)!) } }
 let repo = try PublicRepository("https://github.com/test/Vectracast-Plugins.git")
 assert(repo.name == "test/Vectracast-Plugins")
 rejects { _ = try PublicRepository("https://evil.example/test/repo") }

@@ -80,7 +80,7 @@ struct PluginIndex: Codable {
     }
 }
 
-// Public GitHub endpoints only. The session neither sends cookies nor accepts arbitrary redirects.
+// Fixed distribution service only. The session neither sends cookies nor accepts cross-origin redirects.
 final class PublicDownload: NSObject, URLSessionDataDelegate {
     private var data = Data()
     private let limit: Int
@@ -94,29 +94,32 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
         return try await download.start(url)
     }
     private func start(_ url: URL) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
+        let url = try DistributionSource.transportURL(url)
+        return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             let config = URLSessionConfiguration.ephemeral
             config.httpCookieStorage = nil; config.urlCache = nil; config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 60
             let session = URLSession(configuration: config, delegate: self, delegateQueue: nil); self.session = session
             var request = URLRequest(url: url); request.setValue("Vectracast", forHTTPHeaderField: "User-Agent")
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            request.setValue("application/json, application/octet-stream", forHTTPHeaderField: "Accept")
             task = session.dataTask(with: request); task?.resume()
         }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         let host = request.url?.host ?? ""
         guard request.url?.scheme == "https", request.url?.user == nil, request.url?.password == nil,
-              host == "github.com" || host == "api.github.com" || host.hasSuffix(".githubusercontent.com") else {
-            failure = LauncherError("已拒绝非 GitHub 下载重定向。"); completionHandler(nil); return
+              request.url?.port == nil,
+              host == DistributionSource.apiHost else {
+            failure = LauncherError("已拒绝不受信任的下载重定向。"); completionHandler(nil); return
         }
         completionHandler(request)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, response.expectedContentLength <= Int64(limit) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            failure = LauncherError(status == 404 ? "仓库尚未发布正式 Release，或仓库不是公开的。" : status == 403 || status == 429 ? "GitHub 请求达到频率限制，请稍后重试。" : "下载失败（HTTP \(status)）或文件超过大小限制。")
+            if status == 200 { failure = LauncherError("下载超过大小限制。") }
+            else if status == 409 { failure = LauncherError("插件目录已更新，请刷新商店后重试。") }
+            else { failure = LauncherError("数据服务暂时不可用，请稍后重试（HTTP \(status)）。") }
             completionHandler(.cancel); return
         }
         completionHandler(.allow)
@@ -134,6 +137,27 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
 enum DistributionSource {
     static let appRepository = "Vectracast/Vectracast"
     static let pluginRepository = "Vectracast/Vectracast-Plugins"
+    static let apiHost = "vectracast-api.fix030.com"
+    static let apiBaseURL = URL(string: "https://vectracast-api.fix030.com")!
+    /// Keep original GitHub identities in metadata and route only approved resources through our service.
+    static func transportURL(_ original: URL) throws -> URL {
+        if original.scheme == "https", original.host == apiHost, original.port == nil,
+           original.user == nil, original.password == nil, original.query == nil, original.fragment == nil,
+           original.path.hasPrefix("/v1/") { return original }
+        for (kind, name) in [("app", appRepository), ("plugins", pluginRepository)] {
+            let repo = try PublicRepository(name)
+            if original == repo.latestURL { return apiBaseURL.appendingPathComponent("v1/releases/\(kind)/latest") }
+            let prefix = "/\(name)/releases/download/"
+            if original.host == "github.com", original.path.hasPrefix(prefix) {
+                _ = try repo.assetURL(original.absoluteString)
+                let parts = String(original.path.dropFirst(prefix.count)).split(separator: "/", omittingEmptySubsequences: false)
+                guard parts.count == 2, parts.allSatisfy({ $0.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,160}$", options: .regularExpression) != nil }) else { throw LauncherError("发行附件路径无效。") }
+                return apiBaseURL.appendingPathComponent("v1/assets/\(kind)/\(parts[0])/\(parts[1])")
+            }
+        }
+        throw LauncherError("发行数据仅通过官方数据服务获取。")
+    }
+
     static func validateCatalogRequest(_ input: [String: Any]) throws {
         guard input["repository"] == nil else { throw LauncherError("插件商店固定使用 Vectracast/Vectracast-Plugins，不支持更换仓库。") }
     }
