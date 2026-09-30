@@ -71,6 +71,7 @@ final class Execution: NSObject, RuntimeProtocol {
                 if(!command)throw new Error('命令不存在');
                 const ctx={query:input.query,rawInput:input.rawInput,filter:input.filter||"",preferences:input.preferences||{},search:input.search||{sensitivity:'medium'},
                   secrets:{get:name=>__rpc('secrets.get',{name})},
+                  power:{status:()=>__rpc('power.status',{})},
                   catalog:{list:()=>__rpc('catalog.list',{})},
                   storage:{flags:()=>__rpc('storage.flags',{})},
                   files:{search:(query,kind="all")=>__rpc('files.search',{query,kind})},

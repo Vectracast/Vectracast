@@ -29,11 +29,11 @@
 - ID 为 `publisher.name` 两段小写字母、数字、短横线，各段以字母开头。版本使用数字 `major.minor.patch`。
 - 命令 ID 与入口导出的命令对应，关键词全局唯一；冲突时拒绝安装或启用。
 - `debounceMs` 为 0–5000；底座对关键词和无关键词入口统一使用至少 200ms 的尾沿防抖，实际等待为 `max(200, debounceMs)`，未填写时为 200ms。连续输入重新计时，较长的插件等待时间（如翻译 500ms）保留；最多 20 个命令。
-- `inputMode` 可选 `keyword`（默认）或 `query`。`query` 允许无需关键词执行，`keywords` 可为空，也可保留如 `calc` 的显式入口。安装界面会说明该扩展可读取主搜索输入；升级新增此入口必须重新接受权限。
-- 权限支持 `network`、`clipboard`、`applications`、`catalog`、`browser` 和 `files`；不支持的权限拒绝安装。`applications` 可声明 `read` / `open`，其中 `open` 必须同时声明 `read`。
+- `inputMode` 可选 `keyword`（默认）、`query` 或 `fallback`。`query` 自动匹配主搜索输入；`fallback` 只在没有匹配结果时展示入口，用户选择后才处理当前输入。后两种模式的 `keywords` 可为空，也可保留显式入口。安装界面会说明该扩展可读取主搜索输入；升级新增此入口必须重新接受权限。`fallback` 需要宿主 0.11.0 或更新版本。
+- 权限支持 `network`、`clipboard`、`applications`、`catalog`、`browser`、`files` 和 `power`；不支持的权限拒绝安装。`applications` 可声明 `read` / `open`，其中 `open` 必须同时声明 `read`。
 - 网络声明为精确 HTTPS origin，推荐不带末尾斜杠；不支持端口、通配符或重定向。
 - 配置类型 `text`、`secret`、`dropdown`。secret 不会进入普通 preferences。
-- 图标为 SF Symbols 名称，目前不支持外部图片。
+- 插件与命令图标可为 SF Symbols 名称，或插件包内 `assets/` 下的 PNG/JPEG 图片路径。
 
 ## 查询和结果
 
@@ -77,6 +77,16 @@
 调试：`npm run platform -- search "0xff03"` 查询已安装的无关键词扩展，输出结构化 JSON；显式命令仍可用 `platform query local.calculator calculate "0xff03"`。示例实现在 `extensions/calculator`。
 
 ## 运行时和权限边界
+
+### 电源控制
+
+`permissions.power` 支持 `read` 和 `manage`，后者必须同时声明 `read`。`ctx.power.status()` 返回 `{sleepDisabled, canRestore, powerSource}`，供电状态为 `ac`、`battery` 或 `unknown`。每次查询最多读取两次，不修改设置、不弹出授权窗口。
+
+声明 `manage` 后可返回 `power.enable` / `power.restore` 动作；只读插件可返回 `power.refresh`。三种动作的 `text` 必须为空字符串。宿主在用户选择动作时再次检查插件启用状态与权限，只能执行固定的休眠开关操作，不接受任意命令或 pmset 参数。开启、恢复通过 macOS 管理员授权执行，凭据不经过 SDK。
+
+开启前持久化休眠开关原值，恢复成功并核对系统状态后才删除恢复记录。取消、超时或验证失败会保留记录。此开关全局且持续生效，插件应提示用户在停用、卸载前恢复。示例见 `extensions/keep-awake`。此能力需要新版宿主构建，发布插件时应先发布包含该能力的宿主，再以该宿主版本构建目录。
+
+### 沙箱
 
 扩展执行于启用 App Sandbox 的 JavaScriptCore XPC 服务，默认无直接网络与宿主文件访问权限。没有 Node.js、require、process、fs、child_process、浏览器 DOM、fetch、setTimeout 等常规宿主对象；需要网络时调用 SDK 代理。
 

@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard AppPreferences.shared.change({ $0 = values }) else { _ = replaceBindings(old); throw LauncherError("保存设置失败，已恢复原快捷键。") }
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = BrandAssets.menuBar
+        statusItem.button?.image = BrandAssets.launcher
         statusItem.button?.toolTip = "Vectracast"
         let menu = NSMenu()
         let show = NSMenuItem(title: "显示 Vectracast", action: #selector(toggle), keyEquivalent: ""); show.target = self; menu.addItem(show)

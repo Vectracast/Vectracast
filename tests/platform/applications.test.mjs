@@ -39,6 +39,13 @@ test('application search matches bundle identifier components such as Apple with
 test('unmatched and empty application searches do not create results',async()=>{
  assert.deepEqual(await query('0xff03'),[]);calls=0;assert.deepEqual(await query(' '),[]);assert.equal(calls,0);
 });
+test('a single letter or Chinese character matches names and pinyin immediately',async()=>{
+ for (const sensitivity of ['high','medium','low']) {
+  assert.deepEqual((await query('n',sensitivity)).map(row=>row.title),['Notes','Notes Pro','Super Notes','备忘录']);
+  assert.equal((await query('b',sensitivity))[0].title,'备忘录');
+  assert.equal((await query('备',sensitivity))[0].title,'备忘录');
+ }
+});
 test('application open permission requires list permission',()=>{
  assert.throws(()=>validateManifest({...pkg.manifest,permissions:{applications:['open']}}));
  assert.throws(()=>validateManifest({...pkg.manifest,permissions:{applications:['shell']}}));

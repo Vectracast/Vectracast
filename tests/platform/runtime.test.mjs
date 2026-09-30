@@ -88,11 +88,28 @@ test('broker denies undeclared network, secret and query-time clipboard access',
   ['network','await ctx.network.fetch("https://example.com")',/网络地址/],
   ['secret','await ctx.secrets.get("undeclared")',/密钥/],
   ['clipboard','await __rpc("clipboard.write",{text:"not allowed"})',/查询阶段/],
+  ['power','await ctx.power.status()',/电源状态/],
+  ['power-write','await __rpc("power.enable",{})',/查询阶段/],
  ]) {
   const source=`var Extension={default:{commands:[{id:"convert",query:async ctx=>{${query};return {items:[]}}}]}};`;
   good(install(name,fixture({source}),'--accept-permissions'));
   bad(run(name,'--query','test.sample','convert','test'),pattern);
  }
+});
+test('power capability strips unauthorized and parameterized mutations in real XPC',()=>{
+ const source='var Extension={default:{commands:[{id:"convert",query:async()=>({items:[{id:"one",title:"power",actions:[{id:"refresh",title:"refresh",type:"power.refresh",text:""},{id:"enable",title:"enable",type:"power.enable",text:""},{id:"restore",title:"restore",type:"power.restore",text:""},{id:"forged",title:"forged",type:"power.enable",text:"1; bad"}]}]})}]}};';
+ for (const [home,power,expected] of [['power-none',[],[]],['power-read',['read'],['power.refresh']],['power-manage',['read','manage'],['power.refresh','power.enable','power.restore']]]) {
+  good(install(home,fixture({source,permissions:{power}}),'--accept-permissions'));
+  const rows=JSON.parse(good(run(home,'--query','test.sample','convert',''))).items;
+  assert.deepEqual(rows[0].actions.map(action=>action.type),expected);
+ }
+ bad(install('power-invalid',fixture({permissions:{power:['manage']}}),'--accept-permissions'),/电源能力/);
+});
+test('keep-awake reads real system status without authorization or a recovery snapshot',async()=>{
+ const p=await pack('extensions/keep-awake');good(install('power-real',p.output,'--accept-permissions'));
+ const rows=JSON.parse(good(run('power-real','--query','local.keep-awake','awake',''))).items;
+ assert.equal(rows[0].id,'status');assert.equal(rows[0].actions[0].type,'power.refresh');
+ assert.equal(fs.existsSync(path.join(root,'power-real','power-control','snapshot.json')),false);
 });
 test('host removes unsupported actions and forged application paths',()=>{
  const source='var Extension={default:{commands:[{id:"convert",query:async()=>({items:[{id:"one",title:"safe",applicationPath:"/Applications/Terminal.app",extensionID:"other",actions:[{id:"bad",title:"Run",type:"shell"},{id:"copy",title:"Copy",type:"clipboard.copy",text:"x"}]}]})}]}};';

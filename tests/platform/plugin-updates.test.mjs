@@ -27,7 +27,7 @@ actor PackageDownload {
   return data
  }
 }
-enum BrandAssets { static let logo = NSImage(size: NSSize(width: 32, height: 32)); static let menuBar = NSImage(size: NSSize(width: 18, height: 18)) }
+enum BrandAssets { static let logo = NSImage(size: NSSize(width: 32, height: 32)); static let menuBar = NSImage(size: NSSize(width: 18, height: 18)); static let launcher = menuBar }
 @main struct Check {
  @MainActor static func main() async throws {
   _ = NSApplication.shared

@@ -57,7 +57,8 @@ export function validateManifest(m) {
   if (!Array.isArray(m.commands) || !m.commands.length) throw new Error("No commands declared");
   if (typeof m.entry !== "string" || path.isAbsolute(m.entry) || m.entry.split(/[\\/]/).includes("..")) throw new Error("Entry must be inside extension directory");
   if (!validIconReference(m.icon)) throw new Error("Extension icon must be an SF Symbol name or a PNG/JPEG path under assets/");
-  if (!m.permissions || Object.keys(m.permissions).some(k => !["network", "clipboard", "applications", "catalog", "browser", "files"].includes(k))) throw new Error("Unsupported permission");
+  if (!m.permissions || Object.keys(m.permissions).some(k => !["network", "clipboard", "applications", "catalog", "browser", "files", "power"].includes(k))) throw new Error("Unsupported permission");
+  if (m.permissions.power !== undefined && (!Array.isArray(m.permissions.power) || m.permissions.power.some(x=>!["read","manage"].includes(x)) || (m.permissions.power.includes("manage") && !m.permissions.power.includes("read")))) throw new Error("Invalid power permissions");
   if (m.permissions.files !== undefined && (!Array.isArray(m.permissions.files) || m.permissions.files.some(x=>!["search","open"].includes(x)) || (m.permissions.files.includes("open") && !m.permissions.files.includes("search")))) throw new Error("Invalid files permissions");
   if (m.permissions.applications !== undefined && (!Array.isArray(m.permissions.applications) || m.permissions.applications.some(x=>!["read","open"].includes(x)) || (m.permissions.applications.includes("open") && !m.permissions.applications.includes("read")))) throw new Error("Invalid applications permissions");
   if (m.permissions.clipboard !== undefined && (!Array.isArray(m.permissions.clipboard) || m.permissions.clipboard.some(x => !["write", "history", "history-images", "paste"].includes(x)))) throw new Error("Invalid clipboard permissions");
@@ -73,9 +74,9 @@ export function validateManifest(m) {
     if (c.searchPlaceholder !== undefined && (typeof c.searchPlaceholder !== "string" || c.searchPlaceholder.length > 80)) throw new Error("Invalid search placeholder");
     if (c.filters !== undefined && (!Array.isArray(c.filters) || c.filters.length > 10 || c.filters.some(f => typeof f.id !== "string" || f.id.length > 30 || typeof f.title !== "string" || !f.title.length || f.title.length > 30) || new Set(c.filters.map(f => f.id)).size !== c.filters.length)) throw new Error("Invalid filters");
     if (c.acceptsEmptyQuery !== undefined && typeof c.acceptsEmptyQuery !== "boolean") throw new Error("Invalid acceptsEmptyQuery");
-    if (![undefined, "keyword", "query"].includes(c.inputMode)) throw new Error("Invalid command inputMode");
+    if (![undefined, "keyword", "query", "fallback"].includes(c.inputMode)) throw new Error("Invalid command inputMode");
     if (c.icon !== undefined && !validIconReference(c.icon)) throw new Error("Command icon must be an SF Symbol name or a PNG/JPEG path under assets/");
-    if (!Array.isArray(c.keywords) || (!c.keywords.length && c.inputMode !== "query")) throw new Error("Command needs a keyword or query inputMode");
+    if (!Array.isArray(c.keywords) || (!c.keywords.length && !["query", "fallback"].includes(c.inputMode))) throw new Error("Command needs a keyword or query inputMode");
     if (c.debounceMs !== undefined && (!Number.isInteger(c.debounceMs) || c.debounceMs < 0 || c.debounceMs > 5000)) throw new Error("Invalid debounceMs");
     for (const k of c.keywords) {
       if (!/^[a-z][a-z0-9-]{0,20}$/.test(k) || keys.has(k)) throw new Error("Invalid or duplicate keyword");

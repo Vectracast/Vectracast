@@ -8,10 +8,13 @@ enum BrandAssets {
         return image
     }()
 
-    static let menuBar: NSImage = {
+    static let menuBar = template(named: "MenuBarTemplate")
+    static let launcher = template(named: "LauncherTemplate")
+
+    private static func template(named name: String) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18))
         for suffix in ["", "@2x", "@3x"] {
-            guard let url = Bundle.main.url(forResource: "MenuBarTemplate" + suffix, withExtension: "png"),
+            guard let url = Bundle.main.url(forResource: name + suffix, withExtension: "png"),
                   let data = try? Data(contentsOf: url),
                   let rep = NSBitmapImageRep(data: data) else { fatalError("Missing menu bar artwork") }
             rep.size = image.size
@@ -20,5 +23,5 @@ enum BrandAssets {
         image.isTemplate = true
         image.accessibilityDescription = "Vectracast"
         return image
-    }()
+    }
 }

@@ -43,6 +43,7 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
     private var historyIDs = Set<String>()
     private var catalogIDs = Set<String>()
     private var catalogRequestCount = 0
+    private var powerRequestCount = 0
     func issuedCatalogID(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return !cancelled && catalogIDs.contains(id) }
     func issuedHistoryID(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return !cancelled && historyIDs.contains(id) }
     private var fileSearch: FileSearch?
@@ -65,6 +66,16 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
         lock.lock(); let inactive = cancelled; lock.unlock()
         guard !inactive else { reply(jsonString(["error": "查询已取消。"])); return }
         let input = jsonObject(payload)
+        if method == "power.status" {
+            guard extensionInfo.manifest.permissions.power?.contains("read") == true, input.isEmpty else { reply(jsonString(["error": "扩展没有读取电源状态的权限或参数无效。"])); return }
+            lock.lock(); powerRequestCount += 1; let allowed = powerRequestCount <= 2; lock.unlock()
+            guard allowed else { reply(jsonString(["error": "电源状态请求次数超出限制。"])); return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { reply(jsonString(["value": try JSONSerialization.jsonObject(with: JSONEncoder().encode(PowerControl.shared.status()))])) }
+                catch { reply(jsonString(["error": error.localizedDescription])) }
+            }
+            return
+        }
         if method == "catalog.list" {
             guard extensionInfo.manifest.permissions.catalog?.contains("read") == true else { reply(jsonString(["error": "扩展没有读取插件目录的权限。"])); return }
             lock.lock(); catalogRequestCount += 1; let allowed = catalogRequestCount <= 2; lock.unlock()
@@ -240,6 +251,8 @@ final class RuntimeClient {
                 safe.actions = item.actions.prefix(10).filter { action in
                     guard !action.title.isEmpty, action.title.count <= 120, action.id.count <= 80 else { return false }
                     switch action.type {
+                    case "power.enable", "power.restore": return info.manifest.permissions.power?.contains("manage") == true && action.text == ""
+                    case "power.refresh": return info.manifest.permissions.power?.contains("read") == true && action.text == ""
                     case "file.open", "file.reveal": return info.manifest.permissions.files?.contains("open") == true && fileURL != nil && action.text == safe.fileID
                     case "view.detail": return item.preview?.text != nil || item.detail != nil
                     case "catalog.install": return info.manifest.permissions.catalog?.contains("install") == true && safe.catalogID != nil && action.text == safe.catalogID

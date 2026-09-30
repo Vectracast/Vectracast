@@ -2,6 +2,7 @@
 
 - `vectracast-logo.png`：1254 × 1254 RGBA 主图，保留深色圆角底板，底板外透明。
 - `vectracast-menu-template.png`：1254 × 1254 RGBA 单色模板，保留轨道、箭头和两端节点，透明底。
+- `launcher-rocket.svg`：用户提供的火箭路径，用于启动台左下角和顶部菜单栏；收紧画布留白，以单色模板适配系统外观。构建时导出 18pt 的 1x、2x、3x 透明 PNG。
 
 图案来自用户提供的 Logo。本轮使用内置 image_gen 工具去除外部棋盘格、整理高清边缘，并生成简化菜单栏版本。原稿未覆盖。
 

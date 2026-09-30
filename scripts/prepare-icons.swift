@@ -47,4 +47,12 @@ for scale in 1...3 {
 }
 // Review-only preview of the template artwork against white.
 try save(render(menu, pixels: 216, background: .white), output.appendingPathComponent("menu-preview.png"))
-print("Prepared application icon sizes and 18pt menu template (1x/2x/3x).")
+guard let rocket = NSImage(contentsOf: assets.appendingPathComponent("launcher-rocket.svg")) else {
+    fatalError("Missing launcher rocket SVG")
+}
+for scale in 1...3 {
+    let suffix = scale == 1 ? "" : "@\(scale)x"
+    try save(render(rocket, pixels: 18 * scale), output.appendingPathComponent("LauncherTemplate\(suffix).png"))
+}
+try save(render(rocket, pixels: 216, background: .white), output.appendingPathComponent("launcher-preview.png"))
+print("Prepared application icons and 18pt brand/launcher templates (1x/2x/3x).")

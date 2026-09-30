@@ -23,6 +23,10 @@ test('unmatched text gets safe Google and Baidu web-search actions', async () =>
   }
 });
 
+test('web search is offered as a fallback after root-query plugins return no results', async () => {
+  assert.equal(pkg.manifest.commands.find(command => command.id === 'web').inputMode, 'fallback');
+});
+
 test('explicit engine keywords produce only that search provider', async () => {
   assert.deepEqual(Array.from((await query('google', 'Vectracast')).items, item => item.id), ['google']);
   assert.deepEqual(Array.from((await query('baidu', 'Vectracast')).items, item => item.id), ['baidu']);

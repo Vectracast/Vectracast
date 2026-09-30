@@ -11,10 +11,12 @@ struct LauncherError: LocalizedError {
 struct ExtensionManifest: Codable {
     struct Filter: Codable { let id: String; let title: String }
     struct Command: Codable { let id: String; let title: String; let keywords: [String]; let debounceMs: Int?; let inputMode: String?; let acceptsEmptyQuery: Bool?; let presentation: String?; let filters: [Filter]?; var searchPlaceholder: String? = nil; let icon: String?
-        var isImplicit: Bool { inputMode == "query" }
+        var isImplicit: Bool { inputMode == "query" || inputMode == "fallback" }
+        var isRootQuery: Bool { inputMode == "query" }
+        var isFallbackOnly: Bool { inputMode == "fallback" }
     }
     struct Permissions: Codable {
-        let network: [String]?; let clipboard: [String]?; let applications: [String]?; let catalog: [String]?; let browser: [String]?; let files: [String]?
+        let network: [String]?; let clipboard: [String]?; let applications: [String]?; let catalog: [String]?; let browser: [String]?; let files: [String]?; let power: [String]?
         private struct Key: CodingKey {
             let stringValue: String; let intValue: Int? = nil
             init?(stringValue: String) { self.stringValue = stringValue }
@@ -22,7 +24,7 @@ struct ExtensionManifest: Codable {
         }
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: Key.self)
-            guard container.allKeys.allSatisfy({ ["network", "clipboard", "applications", "catalog", "browser", "files"].contains($0.stringValue) }) else {
+            guard container.allKeys.allSatisfy({ ["network", "clipboard", "applications", "catalog", "browser", "files", "power"].contains($0.stringValue) }) else {
                 throw LauncherError("扩展声明了不支持的权限。")
             }
             network = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "network")!)
@@ -30,6 +32,7 @@ struct ExtensionManifest: Codable {
             applications = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "applications")!)
             catalog = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "catalog")!)
             files = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "files")!)
+            power = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "power")!)
             browser = try container.decodeIfPresent([String].self, forKey: Key(stringValue: "browser")!)
         }
     }
@@ -60,7 +63,7 @@ struct ExtensionManifest: Codable {
         var ids = Set<String>(); var aliases = Set<String>()
         for command in commands {
             guard matches(command.id, "^[a-z][a-z0-9-]{0,50}$"), ids.insert(command.id).inserted,
-                  (command.isImplicit || !command.keywords.isEmpty), [nil, "keyword", "query"].contains(command.inputMode), (0...5000).contains(command.debounceMs ?? 0),
+                  (command.isImplicit || !command.keywords.isEmpty), [nil, "keyword", "query", "fallback"].contains(command.inputMode), (0...5000).contains(command.debounceMs ?? 0),
                   command.icon.map(Self.validIconReference) ?? true else { throw LauncherError("命令声明无效。") }
             guard [nil, "detail", "list"].contains(command.presentation), (command.searchPlaceholder?.count ?? 0) <= 80, (command.filters?.count ?? 0) <= 10,
                   Set((command.filters ?? []).map(\.id)).count == (command.filters?.count ?? 0),
@@ -78,6 +81,7 @@ struct ExtensionManifest: Codable {
         guard Set(permissions.clipboard ?? []).isSubset(of: ["write", "history", "history-images", "paste"]) else { throw LauncherError("剪贴板权限仅支持 write/history/history-images/paste。") }
         guard permissions.clipboard?.contains("history-images") != true || permissions.clipboard?.contains("history") == true,
               permissions.clipboard?.contains("paste") != true || permissions.clipboard?.contains("write") == true else { throw LauncherError("图片历史需要 history，粘贴需要 write。") }
+        guard Set(permissions.power ?? []).isSubset(of: ["read", "manage"]), permissions.power?.contains("manage") != true || permissions.power?.contains("read") == true else { throw LauncherError("电源能力仅支持 read/manage，manage 需要 read。") }
         guard Set(permissions.files ?? []).isSubset(of: ["search", "open"]), permissions.files?.contains("open") != true || permissions.files?.contains("search") == true else { throw LauncherError("文件能力仅支持 search/open，open 需要 search。") }
         guard Set(permissions.applications ?? []).isSubset(of: ["read", "open"]), permissions.applications?.contains("open") != true || permissions.applications?.contains("read") == true else { throw LauncherError("应用能力仅支持 read/open，open 需要 read。") }
         guard Set(permissions.catalog ?? []).isSubset(of: ["read", "install"]), permissions.catalog?.contains("install") != true || permissions.catalog?.contains("read") == true,
@@ -100,6 +104,8 @@ struct ExtensionManifest: Codable {
     }
     var permissionSummary: String {
         var lines: [String] = []
+        if permissions.power?.contains("read") == true { lines.append("读取系统休眠与供电状态") }
+        if permissions.power?.contains("manage") == true { lines.append("开启保持唤醒或恢复原设置（用户选择后，需要系统管理员授权；退出应用后仍生效）") }
         if permissions.files?.contains("search") == true { lines.append("搜索用户目录内 Spotlight 已索引文件的名称、路径和元数据（不读取内容）") }
         if permissions.files?.contains("open") == true { lines.append("打开文件或在 Finder 定位（用户选择后）") }
         if permissions.catalog?.contains("read") == true { lines.append("读取公开插件目录与已安装插件版本") }

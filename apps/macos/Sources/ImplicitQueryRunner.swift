@@ -14,7 +14,7 @@ final class ImplicitQueryRunner {
     }
     func query(_ extensions: [InstalledExtension], input: String, update: @escaping ([ResultItem], Bool) -> Void) {
         cancel(); let token = generation
-        let entries = extensions.filter(\.enabled).flatMap { info in info.manifest.commands.filter(\.isImplicit).map { (info, $0) } }
+        let entries = extensions.filter(\.enabled).flatMap { info in info.manifest.commands.filter(\.isRootQuery).map { (info, $0) } }
         guard !entries.isEmpty, !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { update([], true); return }
         var batches = Array(repeating: [ResultItem](), count: entries.count)
         var remaining = entries.count

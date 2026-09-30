@@ -6,7 +6,13 @@ final class LauncherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, dragHandler?(event) == true { return }
+        if event.type == .leftMouseDown {
+            // Empty-search dragging consumes the click before AppKit's usual activation.
+            // A developer panel kept visible after deactivation must become key first.
+            if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+            if !isKeyWindow { makeKeyAndOrderFront(nil) }
+            if dragHandler?(event) == true { return }
+        }
         if event.type == .keyDown, keyHandler?(event) == true { return }
         super.sendEvent(event)
     }
@@ -94,10 +100,14 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     var onPluginsChanged: (() -> Void)?
     var onSettings: ((String?) -> Void)?
     private var results: [ResultItem] = []
+    private var browsingPlugins = false
+    private lazy var pluginUsage = PluginUsage(root: store.root)
+    private var usageSession: String?
     private var browserCommand: (InstalledExtension, ExtensionManifest.Command)?
     private var pageItem: ResultItem?
     private let pageView = PluginPageView(frame: .zero)
     private var installingPlugin = false
+    private var changingPower = false
     private var isList: Bool { browserCommand?.1.presentation == "list" }
     private let detailView = PluginDetailView(frame: .zero)
     private let detailDivider = NSBox()
@@ -218,7 +228,8 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         bottomBackground.wantsLayer = true; bottomBackground.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.09).cgColor; root.addSubview(bottomBackground)
         bottomLine = NSBox(); bottomLine.boxType = .separator; root.addSubview(bottomLine)
         logo = NSImageView(frame: NSRect(x: 16, y: 445, width: 19, height: 19))
-        logo.image = BrandAssets.logo
+        logo.image = BrandAssets.launcher
+        logo.contentTintColor = .secondaryLabelColor
         logo.imageScaling = .scaleProportionallyUpOrDown
         root.addSubview(logo)
         footer.frame = NSRect(x: 44, y: 445, width: 390, height: 20)
@@ -343,6 +354,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     }
     func hide() { dismiss(); previousApplication?.activate(options: .activateIgnoringOtherApps) }
     private func dismiss() {
+        browsingPlugins = false; usageSession = nil
         actionMenu?.close()
         inputSource.restore()
         dragGuides.hide()
@@ -366,7 +378,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     private var confirmingHistoryAction = false
     func dismissOnBlur() {
         inputSource.restore()
-        if !capturing && !confirmingHistoryAction && !installingPlugin && !(developmentMode && (prefs.values.developerKeepVisible ?? true)) && prefs.values.hideOnBlur && panel.isVisible { dismiss() }
+        if !changingPower && !capturing && !confirmingHistoryAction && !installingPlugin && !(developmentMode && (prefs.values.developerKeepVisible ?? true)) && prefs.values.hideOnBlur && panel.isVisible { dismiss() }
     }
     func windowDidResignKey(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
@@ -420,7 +432,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     }
     private func layoutPanel() {
         let compact = prefs.values.compact
-        let empty = !isDetail && search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let empty = !isDetail && !browsingPlugins && search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let height: CGFloat = empty ? 100 : (!isDetail && compact ? min(474, 148 + CGFloat(results.count) * (table.rowHeight + 2)) : 474)
         // Search results appear immediately; keep the top edge anchored without a resize animation.
         var frame = panel.frame
@@ -465,6 +477,8 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     }
     @objc private func filterChanged() { selectedFilter = typeFilter.selectedItem?.representedObject as? String ?? ""; updateQuery(); focusSearch() }
     private func enterDetail(_ info: InstalledExtension, _ command: ExtensionManifest.Command, query: String) {
+        recordPluginEntry(info, command)
+        browsingPlugins = false
         pageItem = nil; browserCommand = (info, command); selectedFilter = ""; typeFilter.removeAllItems()
         for filter in command.filters ?? [] { typeFilter.addItem(withTitle: filter.title); typeFilter.lastItem?.representedObject = filter.id }
         selectedFilter = command.filters?.first?.id ?? ""
@@ -472,6 +486,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         search.stringValue = query; updateQuery(immediate: true); focusSearch()
     }
     private func escape() {
+        if browsingPlugins { browsingPlugins = false; updateQuery(); focusSearch(); return }
         if pageItem != nil { exitDetail(); return }
         if isDetail && search.stringValue.isEmpty { exitDetail(); return }
         if prefs.values.escape == "close" { hide() }
@@ -479,6 +494,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         else { hide() }
     }
     func controlTextDidChange(_ obj: Notification) {
+        browsingPlugins = false
         if (search.currentEditor() as? NSTextView)?.hasMarkedText() == true {
             pendingQuery.cancel(); runtime.cancel(); implicitQueries.cancel(); queryGeneration = UUID()
             beginWaiting()
@@ -498,7 +514,12 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         guard !textView.hasMarkedText() else { return false }
-        if selector == #selector(NSResponder.moveDown(_:)) { selectRow(min(results.count - 1, table.selectedRow + 1)); return true }
+        if selector == #selector(NSResponder.moveDown(_:)) {
+            if !isDetail && !browsingPlugins && search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                browsingPlugins = true; updateQuery(); return true
+            }
+            selectRow(min(results.count - 1, table.selectedRow + 1)); return true
+        }
         if selector == #selector(NSResponder.moveUp(_:)) { selectRow(max(0, table.selectedRow - 1)); return true }
         if selector == #selector(NSResponder.insertNewline(_:)) { executeSelected(); return true }
         if selector == #selector(NSResponder.cancelOperation(_:)) {
@@ -538,9 +559,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         actionsButton.isEnabled = false
         layoutPanel()
     }
-    private func setResults(_ items: [ResultItem], section: String) {
+    private func setResults(_ items: [ResultItem], section: String, preserveSelection: Bool = true) {
         queryProgress.stopAnimation(nil); queryProgress.isHidden = true; loadingLabel.isHidden = true
-        let id = results.indices.contains(table.selectedRow) ? results[table.selectedRow].id : nil
+        let id = preserveSelection && results.indices.contains(table.selectedRow) ? results[table.selectedRow].id : nil
         resultsPending = true; table.alphaValue = 1; actionsButton.isEnabled = true
         var displayed: [ResultItem] = []; var previousGroup: String?
         for item in items {
@@ -558,13 +579,29 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         updatePrimaryAction()
     }
     func refresh() { revision = ""; updateQuery() }
+    private func recordPluginEntry(_ info: InstalledExtension, _ command: ExtensionManifest.Command) {
+        let key = info.manifest.id + "/" + command.id
+        guard usageSession != key else { return }
+        usageSession = key; pluginUsage.record(info.manifest.id)
+    }
     func updateQuery(immediate: Bool = false, explicitCommand: (InstalledExtension, ExtensionManifest.Command)? = nil) {
         pendingQuery.cancel(); runtime.cancel(); implicitQueries.cancel(); currentExtension = nil
         queryGeneration = UUID(); let generation = queryGeneration
         let raw = search.stringValue
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty || isDetail { browsingPlugins = false }
         if trimmed.isEmpty && !isDetail {
-            footer.stringValue = "Vectracast 已就绪 · 输入关键词开始搜索"
+            usageSession = nil
+            if browsingPlugins {
+                let installed = store.list()
+                iconExtensions = Dictionary(uniqueKeysWithValues: installed.map { ($0.manifest.id, $0) })
+                let items = pluginUsage.items(for: installed) { self.prefs.keywords($0, $1) }
+                footer.stringValue = "↑↓ 选择 · ↵ 打开插件 · Esc 收起"
+                setResults(items.isEmpty ? [.message("还没有启用的插件", "在设置中安装或启用插件。", actions: [ResultAction(id: "settings", title: "打开设置", type: "settings.open", text: nil)])] : items,
+                           section: "最近常用与全部插件 · \(items.count) 个命令")
+                return
+            }
+            footer.stringValue = "Vectracast 已就绪 · ↓ 浏览插件"
             setResults([ResultItem(id: "welcome", title: "Vectracast 已就绪", subtitle: nil, icon: "arrow.up.forward.square.fill", actions: [ResultAction(id: "settings", title: "打开设置", type: "settings.open", text: nil)])], section: "")
             return
         }
@@ -580,6 +617,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         let resolved = entry.flatMap { entry in commands.first { $0.0.manifest.id + "/" + $0.1.id == entry.key } }
         if let matched = active ?? explicitCommand ?? resolved {
             let (info, command) = matched
+            recordPluginEntry(info, command)
             currentExtension = info.manifest.id
             let query = isDetail ? raw : (explicitCommand != nil ? (command.isImplicit ? raw : "") : entry?.query ?? "")
             if !isDetail && explicitCommand == nil && command.presentation != nil { enterDetail(info, command, query: query); return }
@@ -607,6 +645,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             return
         }
         var items: [ResultItem] = []
+        usageSession = nil
         for info in extensions {
             for command in info.manifest.commands where trimmed.isEmpty || ([command.id, command.title, info.manifest.name] + prefs.keywords(info, command)).contains(where: { $0.localizedCaseInsensitiveContains(trimmed) }) {
                 let keywords = prefs.keywords(info, command)
@@ -619,7 +658,36 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
             items.append(ResultItem(id: "extensions", title: "设置", subtitle: "Vectracast", icon: "gearshape.fill", actions: [ResultAction(id: "manage", title: "打开", type: "settings.open", text: nil)]))
         }
         footer.stringValue = "Vectracast"
-        guard items.isEmpty else { setResults(items, section: "结果"); return }
+        // Command suggestions must not short-circuit automatic queries, even for one character.
+        let commandMatches = items
+        let rootQueryCommands = extensions.flatMap { $0.manifest.commands }.filter(\.isRootQuery)
+        if !rootQueryCommands.isEmpty {
+            beginWaiting()
+            footer.stringValue = "正在搜索应用与命令…"
+            var hasPublishedMatches = false
+            implicitQueries.query(extensions, input: trimmed) { [weak self] matches, isComplete in
+                guard let self, self.queryGeneration == generation, self.search.stringValue == raw else { return }
+                guard isComplete || !matches.isEmpty else { return }
+                let combined = matches + commandMatches
+                if !combined.isEmpty {
+                    self.setResults(combined, section: "结果 · \(combined.count) 条", preserveSelection: hasPublishedMatches)
+                    hasPublishedMatches = true
+                    self.footer.stringValue = "↑↓ 选择结果 · ↵ 执行动作"
+                    return
+                }
+                guard isComplete else { return }
+                let fallbackEntries = QueryFallback.entries(for: extensions, input: trimmed)
+                if !fallbackEntries.isEmpty {
+                    self.setResults(fallbackEntries, section: "可用扩展")
+                    self.footer.stringValue = "选择扩展 · ↵ 使用当前输入"
+                } else {
+                    self.setResults([.message("没有匹配结果", "尝试其他输入，或在扩展管理中启用相关功能。", icon: "magnifyingglass")], section: "结果")
+                    self.footer.stringValue = "Vectracast"
+                }
+            }
+            return
+        }
+        guard commandMatches.isEmpty else { setResults(commandMatches, section: "结果"); return }
         let fallbackEntries = QueryFallback.entries(for: extensions, input: trimmed)
         guard !fallbackEntries.isEmpty else {
             setResults([.message("没有匹配结果", "尝试其他输入，或在扩展管理中启用相关功能。", icon: "magnifyingglass")], section: "结果")
@@ -696,7 +764,31 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     func tableViewSelectionDidChange(_ notification: Notification) { updatePrimaryAction() }
     @objc func executeSelected() { if let item = selected, let action = item.actions.first { execute(action, item: item) } }
     private func execute(_ action: ResultAction, item: ResultItem) {
+        if let id = item.extensionID, currentExtension != id,
+           !["command.open", "command.input", "settings.open", "input.set", "view.detail"].contains(action.type),
+           store.list().contains(where: { $0.enabled && $0.manifest.id == id }) {
+            pluginUsage.record(id)
+        }
         switch action.type {
+        case "power.refresh":
+            guard action.text == "", let id = item.extensionID, store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.power?.contains("read") == true }) else { return }
+            updateQuery(immediate: true)
+        case "power.enable", "power.restore":
+            guard !changingPower, action.text == "", let id = item.extensionID,
+                  store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.power?.contains("manage") == true }) else { return }
+            changingPower = true; footer.stringValue = "正在处理电源设置 · 请完成系统管理员授权…"
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let outcome = Result { try PowerControl.shared.perform(action.type) }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.changingPower = false
+                    switch outcome {
+                    case .success: self.updateQuery(immediate: true)
+                    case .failure(let error): self.footer.stringValue = error.localizedDescription
+                    }
+                    if self.panel.isVisible { self.panel.makeKeyAndOrderFront(nil); self.focusSearch() }
+                }
+            }
         case "view.detail":
             guard item.extensionID != nil else { return }
             var detail = item; detail.actions.removeAll { $0.type == "view.detail" }; pageItem = detail

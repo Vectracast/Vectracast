@@ -35,8 +35,9 @@ test('unmatched searches yield no results; incomplete math produces non-actionab
  }
  assert.match((await rows('1/3'))[0].subtitle,/约值/);
 });
-test('manifest allows keywordless commands only with explicit query mode',()=>{
+test('manifest allows keywordless automatic-query and fallback commands',()=>{
  validateManifest({...pkg.manifest,commands:[{id:'root',title:'root',keywords:[],inputMode:'query'}]});
+ validateManifest({...pkg.manifest,commands:[{id:'root',title:'root',keywords:[],inputMode:'fallback'}]});
  assert.throws(()=>validateManifest({...pkg.manifest,commands:[{id:'root',title:'root',keywords:[]}]}));
  assert.throws(()=>validateManifest({...pkg.manifest,commands:[{id:'root',title:'root',keywords:['ok'],inputMode:'typo'}]}));
 });

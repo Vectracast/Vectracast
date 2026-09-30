@@ -16,6 +16,7 @@ swift "$PROJECT_DIR/scripts/prepare-icons.swift" "$PROJECT_DIR"
 iconutil -c icns "$PROJECT_DIR/build/branding/AppIcon.iconset" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 cp "$PROJECT_DIR/assets/branding/vectracast-logo.png" "$APP_DIR/Contents/Resources/VectracastLogo.png"
 cp "$PROJECT_DIR"/build/branding/MenuBarTemplate*.png "$APP_DIR/Contents/Resources/"
+cp "$PROJECT_DIR"/build/branding/LauncherTemplate*.png "$APP_DIR/Contents/Resources/"
 swiftc -swift-version 5 -O -g -target arm64-apple-macosx13.3 \
   "$PROJECT_DIR/apps/macos/Shared/RuntimeProtocol.swift" \
   "$PROJECT_DIR/services/extension-host/main.swift" \
@@ -60,7 +61,7 @@ cat > "$PROJECT_DIR/build/extension-host.entitlements" <<'PLIST'
 PLIST
 mkdir -p "$APP_DIR/Contents/Resources/Documentation"
 cp -R "$PROJECT_DIR/docs/developer" "$PROJECT_DIR/docs/architecture" "$PROJECT_DIR/docs/platform" "$APP_DIR/Contents/Resources/Documentation/"
-for extension in applications calculator text-tools youdao clipboard-history plugin-store file-search; do
+for extension in applications calculator text-tools youdao clipboard-history plugin-store file-search keep-awake; do
   mkdir -p "$APP_DIR/Contents/Resources/extensions/$extension"
   if [ -f "$PROJECT_DIR/extensions/$extension/README.md" ]; then
     cp "$PROJECT_DIR/extensions/$extension/README.md" "$APP_DIR/Contents/Resources/extensions/$extension/README.md"

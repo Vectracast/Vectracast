@@ -5,7 +5,7 @@ enum QueryFallback {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
         let candidates = extensions.filter(\.enabled).flatMap { info in
-            info.manifest.commands.filter(\.isImplicit).map { (info, $0) }
+            info.manifest.commands.filter(\.isFallbackOnly).map { (info, $0) }
         }
         guard !candidates.isEmpty else { return [] }
         let heading = ResultItem(id: "fallback-heading", title: "使用“\(String(query.prefix(80)))”处理", subtitle: nil, icon: nil, actions: [], groupHeading: true)
