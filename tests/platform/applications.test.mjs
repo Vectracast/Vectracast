@@ -21,6 +21,21 @@ test('application matching/ranking and action creation are provided by the plugi
  assert.deepEqual(rows[0].actions.map(x=>x.type),['application.open','application.reveal','application.info','application.contents','storage.toggle']);assert.equal(rows[0].actions[0].text,'a');assert.equal(rows[0].applicationId,'a');
  assert.equal((await query('beiwang'))[0].title,'备忘录');
 });
+
+test('application search matches bundle identifier components such as Apple without matching generic com',async()=>{
+ const fixtures=[
+  {id:'safari',name:'Safari',bundleIdentifier:'com.apple.Safari',searchTerms:[]},
+  {id:'music',name:'Music',bundleIdentifier:'com.apple.Music',searchTerms:[]},
+  {id:'calendar',name:'Calendar',bundleIdentifier:'com.apple.iCal',searchTerms:[]},
+  {id:'chrome',name:'Google Chrome',bundleIdentifier:'com.google.Chrome',searchTerms:[]},
+ ];
+ const search=async (query,sensitivity='medium')=>(await extension.commands[0].query({query,search:{sensitivity},storage:{flags:async()=>({})},applications:{list:async()=>fixtures}})).items;
+ assert.deepEqual((await search('Apple')).map(row=>row.id),['calendar','music','safari']);
+ assert.deepEqual((await search('com.apple')).map(row=>row.id),['calendar','music','safari']);
+ assert.deepEqual((await search('apple','high')).map(row=>row.id),['calendar','music','safari']);
+ assert.deepEqual(await search('com','high'),[]);
+ assert.equal((await search('apple.music'))[0].id,'music');
+});
 test('unmatched and empty application searches do not create results',async()=>{
  assert.deepEqual(await query('0xff03'),[]);calls=0;assert.deepEqual(await query(' '),[]);assert.equal(calls,0);
 });
