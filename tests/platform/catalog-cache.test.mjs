@@ -8,6 +8,7 @@ import {spawnSync} from 'node:child_process';
 test('catalog cache survives restart, refreshes stale data, coalesces loads and rejects corrupt or foreign data', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vectracast-cache-'));
   try {
+    fs.copyFileSync("extensions/calculator/extension.json", path.join(dir,"manifest.json"));
     const source = path.join(dir, 'CacheTest.swift');
     fs.writeFileSync(source, `
 import Foundation
@@ -20,8 +21,13 @@ actor Fetcher {
  }
 }
 func fixture(_ repo: PublicRepository, _ tag: String, age: Double = 0) -> CatalogCache {
- let asset = PublicRelease.Asset(name: "index.json", browser_download_url: "https://github.com/\\(repo.name)/releases/download/\\(tag)/index.json", size: 40)
- return CatalogCache(repository: repo.name, fetchedAt: Date().addingTimeInterval(-age), release: PublicRelease(tag_name: tag, body: nil, draft: false, prerelease: false, assets: [asset]), index: PluginIndex(schemaVersion: 1, plugins: []))
+ let root = URL(fileURLWithPath: CommandLine.arguments[1])
+ var json = try! JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("manifest.json"))) as! [String: Any]
+ json["description"] = tag
+ json["version"] = tag == "plugins-v2" ? "2.0.0" : "1.0.0"
+ let manifest = try! JSONDecoder().decode(ExtensionManifest.self, from: JSONSerialization.data(withJSONObject: json))
+ let entry = PluginIndex.Entry(manifest: manifest, asset: "\\(manifest.id)-\\(manifest.version).launcher-extension", sha256: String(repeating: "a", count: 64), minimumAppVersion: "0.7.0", downloadURL: "/v2/plugins/\\(manifest.id)/versions/\\(manifest.version)/download")
+ return CatalogCache(repository: repo.name, fetchedAt: Date().addingTimeInterval(-age), index: PluginIndex(schemaVersion: 1, plugins: [entry]))
 }
 @main struct Test {
  static func main() async throws {
@@ -34,19 +40,23 @@ func fixture(_ repo: PublicRepository, _ tag: String, age: Double = 0) -> Catalo
   let count = await counter.calls; assert(count == 1)
   assert(CatalogCache.read(file, repository: repo) != nil)
   let restarted = PluginCatalogService(cacheURL: file, fetch: { _ in fatalError("Fresh cache must not use network") })
-  let fresh = try await restarted.load(); assert(fresh.release.tag_name == "plugins-v2")
+  let fresh = try await restarted.load(); assert(fresh.entries[0].1.manifest.description == "plugins-v2")
   try fixture(repo, "plugins-v1", age: 3600).write(file)
   let stale = PluginCatalogService(cacheURL: file, fetch: { try await counter.fetch($0) })
-  let first = try await stale.load(); assert(first.release.tag_name == "plugins-v1")
+  let first = try await stale.load(); assert(first.entries[0].1.manifest.description == "plugins-v1")
   try await Task.sleep(nanoseconds: 350_000_000)
-  let updated = try await stale.load(); assert(updated.release.tag_name == "plugins-v2")
+  let updated = try await stale.load(); assert(updated.entries[0].1.manifest.description == "plugins-v2")
+  // Re-reading identical metadata keeps handles stable; content changes do not rely on a batch tag.
+  let stable = try await stale.load(); assert(stable.entries[0].0 == updated.entries[0].0)
+  assert(first.entries[0].0 != updated.entries[0].0)
+  assert(first.entries[0].1.manifest.version == "1.0.0" && updated.entries[0].1.manifest.version == "2.0.0")
   await stale.invalidate(); _ = try await stale.load()
   let refreshed = await counter.calls; assert(refreshed == 3)
   try fixture(repo, "plugins-v1", age: 3600).write(file)
   let offline = PluginCatalogService(cacheURL: file, fetch: { _ in throw LauncherError("Offline") })
-  let fallback = try await offline.load(); assert(fallback.release.tag_name == "plugins-v1")
+  let fallback = try await offline.load(); assert(fallback.entries[0].1.manifest.description == "plugins-v1")
   try await Task.sleep(nanoseconds: 50_000_000)
-  let fallbackAgain = try await offline.load(); assert(fallbackAgain.release.tag_name == "plugins-v1")
+  let fallbackAgain = try await offline.load(); assert(fallbackAgain.entries[0].1.manifest.description == "plugins-v1")
   try JSONEncoder().encode(fixture(repo, "old", age: 8 * 86400)).write(to: file)
   assert(CatalogCache.read(file, repository: repo) == nil)
   try JSONEncoder().encode(fixture(PublicRepository("other/plugins"), "foreign")).write(to: file)

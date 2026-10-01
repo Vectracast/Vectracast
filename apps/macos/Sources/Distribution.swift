@@ -55,6 +55,12 @@ struct PluginIndex: Codable {
         let minimumAppVersion: String
         var sourceDirectory: String? = nil
         var categories: [String]? = nil
+        var downloadURL: String? = nil
+        func registryDownloadURL() throws -> URL {
+            let path = "/v2/plugins/\(manifest.id)/versions/\(manifest.version)/download"
+            guard downloadURL == path else { throw LauncherError("插件下载地址与版本不一致。") }
+            return try DistributionSource.transportURL(DistributionSource.apiBaseURL.appendingPathComponent(String(path.dropFirst())))
+        }
         var searchText: String { ([manifest.name, manifest.id, manifest.description] + manifest.commands.flatMap { [$0.id, $0.title] + $0.keywords }).joined(separator: " ") }
         func validate() throws {
             try manifest.validate(); _ = try ReleaseVersion(minimumAppVersion)
@@ -93,9 +99,13 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
     private init(limit: Int, progress: @escaping ProgressHandler) { self.limit = limit; self.progress = progress }
     static func data(from url: URL, limit: Int, progress: @escaping ProgressHandler = { _, _ in }) async throws -> Data {
         let download = PublicDownload(limit: limit, progress: progress)
-        return try await download.start(url)
+        return try await download.start(url, body: nil)
     }
-    private func start(_ url: URL) async throws -> Data {
+    static func post(to url: URL, body: Data, limit: Int) async throws -> Data {
+        let download = PublicDownload(limit: limit, progress: { _, _ in })
+        return try await download.start(url, body: body)
+    }
+    private func start(_ url: URL, body: Data?) async throws -> Data {
         let url = try DistributionSource.transportURL(url)
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
@@ -104,22 +114,27 @@ final class PublicDownload: NSObject, URLSessionDataDelegate {
             let session = URLSession(configuration: config, delegate: self, delegateQueue: nil); self.session = session
             var request = URLRequest(url: url); request.setValue("Vectracast", forHTTPHeaderField: "User-Agent")
             request.setValue("application/json, application/octet-stream", forHTTPHeaderField: "Accept")
+            if let body {
+                guard url.path == "/v2/plugins/updates", body.count <= 200_000 else {
+                    self.continuation = nil; self.session = nil; session.invalidateAndCancel()
+                    continuation.resume(throwing: LauncherError("更新检查请求无效。")); return
+                }
+                request.httpMethod = "POST"; request.httpBody = body
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
             task = session.dataTask(with: request); task?.resume()
         }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        let host = request.url?.host ?? ""
-        guard request.url?.scheme == "https", request.url?.user == nil, request.url?.password == nil,
-              request.url?.port == nil,
-              host == DistributionSource.apiHost else {
-            failure = LauncherError("已拒绝不受信任的下载重定向。"); completionHandler(nil); return
-        }
-        completionHandler(request)
+        // Registry identities must never redirect to another version, origin, or API operation.
+        failure = LauncherError("已拒绝下载重定向，请刷新后重试。")
+        completionHandler(nil)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, response.expectedContentLength <= Int64(limit) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200 { failure = LauncherError("下载超过大小限制。") }
+            else if status == 404 || status == 410 { failure = LauncherError("所请求的版本或资源已撤回或不可用，请刷新后重试。") }
             else if status == 409 { failure = LauncherError("插件目录已更新，请刷新商店后重试。") }
             else { failure = LauncherError("数据服务暂时不可用，请稍后重试（HTTP \(status)）。") }
             completionHandler(.cancel); return
@@ -147,7 +162,7 @@ enum DistributionSource {
     static func transportURL(_ original: URL) throws -> URL {
         if original.scheme == "https", original.host == apiHost, original.port == nil,
            original.user == nil, original.password == nil, original.query == nil, original.fragment == nil,
-           original.path.hasPrefix("/v1/") { return original }
+           (original.path.hasPrefix("/v1/") || validPluginPath(original.path)) { return original }
         for (kind, name) in [("app", appRepository), ("plugins", pluginRepository)] {
             let repo = try PublicRepository(name)
             if original == repo.latestURL { return apiBaseURL.appendingPathComponent("v1/releases/\(kind)/latest") }
@@ -160,6 +175,11 @@ enum DistributionSource {
             }
         }
         throw LauncherError("发行数据仅通过官方数据服务获取。")
+    }
+
+    private static func validPluginPath(_ path: String) -> Bool {
+        if path == "/v2/plugins" || path == "/v2/plugins/updates" { return true }
+        return path.range(of: "^/v2/plugins/[A-Za-z0-9][A-Za-z0-9._-]{0,160}/versions(?:/(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)/download)?$", options: .regularExpression) != nil
     }
 
     static func validateCatalogRequest(_ input: [String: Any]) throws {
@@ -185,15 +205,13 @@ enum DistributionSource {
 struct CatalogCache: Codable {
     let repository: String
     let fetchedAt: Date
-    let release: PublicRelease
     let index: PluginIndex
     func validate(for repository: PublicRepository, now: Date = Date()) throws {
         let age = now.timeIntervalSince(fetchedAt)
         guard self.repository == repository.name, age >= -60, age < 7 * 86400,
-              !release.draft, !release.prerelease else { throw LauncherError("目录缓存已过期。") }
+              repository.name == DistributionSource.pluginRepository else { throw LauncherError("目录缓存已过期。") }
         try index.validate()
-        _ = try release.asset("index.json", repository: repository, limit: 2_000_000)
-        for entry in index.plugins { _ = try release.asset(entry.asset, repository: repository, limit: 3_000_000) }
+        for entry in index.plugins { _ = try entry.registryDownloadURL() }
     }
     static func read(_ url: URL, repository: PublicRepository) -> Self? {
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4_000_000,

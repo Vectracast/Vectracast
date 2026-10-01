@@ -37,16 +37,24 @@ enum BrandAssets { static let logo = NSImage(size: NSSize(width: 32, height: 32)
   let remote = try JSONDecoder().decode(ExtensionPackage.self, from: Data(contentsOf: root.appendingPathComponent("remote.json")))
   let remoteData = try Data(contentsOf: root.appendingPathComponent("remote.json"))
   let repo = try PublicRepository(DistributionSource.pluginRepository)
-  let entry = PluginIndex.Entry(manifest: remote.manifest, asset: "local.calculator-1.10.0.launcher-extension", sha256: SHA256.hash(data: remoteData).map { String(format: "%02x", $0) }.joined(), minimumAppVersion: "0.7.0")
-  let release = PublicRelease(tag_name: "test", body: nil, draft: false, prerelease: false, assets: ["index.json",entry.asset].map { PublicRelease.Asset(name: $0, browser_download_url: "https://github.com/\\(repo.name)/releases/download/test/\\($0)", size: 100) })
-  let snapshot = PluginCatalogService.Snapshot(repository: repo, release: release, entries: [("handle", entry)], loaded: Date())
+  let entry = PluginIndex.Entry(manifest: remote.manifest, asset: "local.calculator-1.10.0.launcher-extension", sha256: SHA256.hash(data: remoteData).map { String(format: "%02x", $0) }.joined(), minimumAppVersion: "0.7.0", downloadURL: "/v2/plugins/local.calculator/versions/1.10.0/download")
+
+  let snapshot = PluginCatalogService.Snapshot(repository: repo, entries: [("handle", entry)], loaded: Date())
   let installed = store.list()[0]
   assert(snapshot.update(for: installed)?.1.manifest.version == "1.10.0")
   let development = InstalledExtension(manifest: installed.manifest, source: installed.source, enabled: true, previous: nil, preferences: [:], development: true)
   assert(snapshot.update(for: development) == nil)
   let downloader = PackageDownload()
-  let service = PluginCatalogService(cacheURL: root.appendingPathComponent("cache.json"), fetchPackage: { _, _ in try await downloader.fetch(remoteData) }, fetch: { repository in
-    CatalogCache(repository: repository.name, fetchedAt: Date(), release: release, index: PluginIndex(schemaVersion: 1, plugins: [entry]))
+  let service = PluginCatalogService(cacheURL: root.appendingPathComponent("cache.json"), fetchUpdates: { body in
+    let input = try JSONSerialization.jsonObject(with: body) as! [String: Any]
+    assert((input["plugins"] as! [[String: String]]).first?["version"] == "1.9.0")
+    return try JSONSerialization.data(withJSONObject: ["updates": [JSONSerialization.jsonObject(with: JSONEncoder().encode(entry))]])
+  }, fetchPackage: { url, progress in
+    assert(url.absoluteString == "https://vectracast-api.fix030.com/v2/plugins/local.calculator/versions/1.10.0/download")
+    progress(10, Int64(remoteData.count))
+    return try await downloader.fetch(remoteData)
+  }, fetch: { repository in
+    CatalogCache(repository: repository.name, fetchedAt: Date(), index: PluginIndex(schemaVersion: 1, plugins: [entry]))
   })
   let ui = ExtensionWindow(store: store, catalogService: service)
   ui.window.setFrameAutosaveName("")
@@ -92,8 +100,8 @@ enum BrandAssets { static let logo = NSImage(size: NSSize(width: 32, height: 32)
   assert(snapshot.update(for: store.list()[0]) == nil)
   assert(!all(ui.form).compactMap { $0 as? NSButton }.contains { $0.title == "更新插件" })
   // An installed version newer than the catalog must never offer a downgrade.
-  let oldEntry = PluginIndex.Entry(manifest: installed.manifest, asset: entry.asset, sha256: entry.sha256, minimumAppVersion: "0.7.0")
-  let oldSnapshot = PluginCatalogService.Snapshot(repository: repo, release: release, entries: [("old",oldEntry)], loaded: Date())
+  let oldEntry = PluginIndex.Entry(manifest: installed.manifest, asset: entry.asset, sha256: entry.sha256, minimumAppVersion: "0.7.0", downloadURL: "/v2/plugins/local.calculator/versions/1.10.0/download")
+  let oldSnapshot = PluginCatalogService.Snapshot(repository: repo, entries: [("old",oldEntry)], loaded: Date())
   assert(oldSnapshot.update(for: store.list()[0]) == nil)
   print("PASS: numeric updates, development protection, direct controls, installed state and downgrade protection")
  }

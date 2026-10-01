@@ -417,7 +417,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
             defer { self.catalogTask = nil; self.catalogRefresh.isEnabled = true }
             do {
                 if force { await self.catalogService.invalidate() }
-                self.catalogSnapshot = try await self.catalogService.load()
+                self.catalogSnapshot = try await self.catalogService.updates(for: self.store.list())
                 self.refreshCatalogPresentation()
             } catch { self.catalogStatus.stringValue = "检查失败，点击重试 · " + error.localizedDescription }
         }
@@ -445,7 +445,7 @@ final class ExtensionWindow: NSObject, NSTableViewDataSource, NSTableViewDelegat
             defer { self.updatingID = nil; self.refreshCatalogPresentation() }
             do {
                 // Refresh opaque handles before downloading, including after a long-open settings session.
-                let snapshot = try await self.catalogService.load(); self.catalogSnapshot = snapshot
+                let snapshot = try await self.catalogService.updates(for: self.store.list()); self.catalogSnapshot = snapshot
                 guard let (handle, entry) = snapshot.update(for: original), self.compatible(entry) else {
                     throw LauncherError("没有兼容的更新，请检查插件目录或更新 Vectracast。")
                 }

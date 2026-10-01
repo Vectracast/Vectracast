@@ -91,10 +91,9 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
                         do {
                             let installed = try ExtensionStore().list()
                             let current = try ReleaseVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.0")
-                            let tag = snapshot.release.tag_name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#%"))) ?? ""
                             let rows: [[String: Any]] = try snapshot.entries.map { handle, entry in
-                                let source = "https://github.com/" + snapshot.repository.name + "/tree/" + tag + (entry.sourceDirectory.map { "/" + $0 } ?? "")
-                                var value: [String: Any] = ["handle": handle, "manifest": try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry.manifest)), "permissions": entry.manifest.permissionSummary, "minimumAppVersion": entry.minimumAppVersion, "compatible": current >= (try ReleaseVersion(entry.minimumAppVersion)), "sourceURL": source, "readmeURL": source + "#readme", "releaseNotes": snapshot.release.body ?? "", "categories": entry.categories ?? []]
+                                let source = "https://github.com/" + snapshot.repository.name + "/tree/main" + (entry.sourceDirectory.map { "/" + $0 } ?? "")
+                                var value: [String: Any] = ["handle": handle, "manifest": try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry.manifest)), "permissions": entry.manifest.permissionSummary, "minimumAppVersion": entry.minimumAppVersion, "compatible": current >= (try ReleaseVersion(entry.minimumAppVersion)), "sourceURL": source, "readmeURL": source + "#readme", "releaseNotes": "", "categories": entry.categories ?? []]
                                 if let version = installed.first(where: { $0.manifest.id == entry.manifest.id })?.manifest.version { value["installedVersion"] = version }
                                 return value
                             }

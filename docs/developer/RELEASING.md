@@ -90,6 +90,16 @@ git clone --recurse-submodules https://github.com/Vectracast/Vectracast.git
 
 常规自动发布先发布主仓库工具链版本，再发布插件目录。首次空仓库接入使用文末的本地引导流程，插件验证通过后才上传主仓库。两边 checkout 均不持久保存令牌。
 
+## 客户端插件分发协议
+
+宿主插件目录使用 `GET /v2/plugins`。设置页通过 `POST /v2/plugins/updates` 提交宿主版本和已安装插件的 ID、版本；不提交开发插件、用户配置或搜索内容。服务端返回独立插件更新，客户端再次检查版本递增、兼容性和下载目标。
+
+下载地址必须精确匹配 `/v2/plugins/{id}/versions/{version}/download`，仅访问官方 HTTPS 服务，不接受重定向。安装前校验 SHA-256、包声明与目录声明，保留下载进度及失败后的原版本。`GET /v2/plugins/{id}/versions` 用于读取版本历史，不自动降级。
+
+目录缓存为 `catalog/official-v2.json`，与旧发行批次缓存隔离；缓存最长保留七天，五分钟后后台刷新。内容变化即生成新的安装句柄，不以批次标签判定是否更新。设置页更新检查直接请求服务器，部分更新结果不覆盖完整目录缓存。后台撤回版本后，即使客户端还显示缓存条目，下载也会失败并提示刷新。
+
+商店搜索和展示仍由插件负责，SDK 的 `catalog.list` / `catalog.install` 接口保持兼容。App 自更新仍使用签名 appcast，与插件协议独立。
+
 ## 5. 发布应用
 
 1. 修改 `package.json` 的 `version` 和 `buildNumber`，同步 lockfile 版本。`npm version 0.7.2 --no-git-tag-version` 可以更新两个版本字段；`buildNumber` 另行递增。
