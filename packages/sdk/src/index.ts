@@ -1,12 +1,15 @@
 /** SDK 0.1. Native host renders query results directly in the launcher. */
-export interface Action { id: string; title: string; type: "power.enable" | "power.restore" | "power.refresh" | "file.open" | "file.reveal" | "view.detail" | "catalog.install" | "catalog.refresh" | "url.open" | "clipboard.copy" | "application.open" | "application.reveal" | "application.info" | "application.contents" | "storage.toggle" | "clipboard.history.remove" | "clipboard.history.clear" | "clipboard.history.copy" | "clipboard.history.paste"; text: string; icon?: string; shortcut?: { key: string; modifiers: ("command" | "shift" | "option" | "control")[] }; section?: string }
+export interface Action { id: string; title: string; type: "power.enable" | "power.restore" | "power.refresh" | "fanbar.restore" | "fanbar.preset" | "fanbar.rpm" | "fanbar.eighty" | "fanbar.refresh" | "file.open" | "file.reveal" | "view.detail" | "catalog.install" | "catalog.refresh" | "url.open" | "clipboard.copy" | "application.open" | "application.reveal" | "application.info" | "application.contents" | "storage.toggle" | "clipboard.history.remove" | "clipboard.history.clear" | "clipboard.history.copy" | "clipboard.history.paste"; text: string; icon?: string; shortcut?: { key: string; modifiers: ("command" | "shift" | "option" | "control")[] }; section?: string }
 export interface ClipboardHistoryEntry { id: string; text: string; source: string; timestamp: number; kind?: "text" | "image"; width?: number; height?: number; byteCount?: number; sourceBundleID?: string }
 export interface Application { id: string; name: string; bundleIdentifier: string; searchTerms: string[]; urlSchemes?: string[]; documentTypes?: string[] }
 export interface ResultItem { id: string; title: string; subtitle?: string; /** SF Symbol name or packaged assets/... PNG/JPEG resource path. */ icon?: string; detail?: string; preview?: { text?: string; historyImageID?: string }; metadata?: { label: string; value: string }[]; group?: string; fileID?: string; catalogID?: string; applicationId?: string; actions: Action[] }
 export interface PowerStatus { sleepDisabled: boolean; canRestore: boolean; powerSource: "ac" | "battery" | "unknown" }
+export interface FanBarFan { index: number; currentRPM: number; minimumRPM: number; maximumRPM: number; isManual: boolean }
+export interface FanBarStatus { available: boolean; fans: FanBarFan[]; error?: string }
 export interface QueryContext {
   /** Read-only. Mutations require a user-selected power action and native authorization. */
   power: { status(): Promise<PowerStatus> };
+  fanbar: { status(): Promise<FanBarStatus> };
   files: { search(query: string, kind?: string): Promise<{ files: FileEntry[]; limited: boolean; timedOut: boolean }> };
   catalog: { list(): Promise<CatalogSnapshot> };
   query: string;

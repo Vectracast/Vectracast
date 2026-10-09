@@ -108,6 +108,7 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
     private let pageView = PluginPageView(frame: .zero)
     private var installingPlugin = false
     private var changingPower = false
+    private var changingFanBar = false
     private var isList: Bool { browserCommand?.1.presentation == "list" }
     private let detailView = PluginDetailView(frame: .zero)
     private let detailDivider = NSBox()
@@ -773,6 +774,9 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
         case "power.refresh":
             guard action.text == "", let id = item.extensionID, store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.power?.contains("read") == true }) else { return }
             updateQuery(immediate: true)
+        case "fanbar.refresh":
+            guard action.text == "", let id = item.extensionID, store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.fanbar?.contains("read") == true }) else { return }
+            updateQuery(immediate: true)
         case "power.enable", "power.restore":
             guard !changingPower, action.text == "", let id = item.extensionID,
                   store.list().contains(where: { $0.enabled && $0.manifest.id == id && $0.manifest.permissions.power?.contains("manage") == true }) else { return }
@@ -788,6 +792,20 @@ final class LauncherWindow: NSObject, NSTextFieldDelegate, NSTableViewDataSource
                     }
                     if self.panel.isVisible { self.panel.makeKeyAndOrderFront(nil); self.focusSearch() }
                 }
+            }
+        case "fanbar.restore", "fanbar.preset", "fanbar.rpm", "fanbar.eighty":
+            guard !changingFanBar, let extensionID = item.extensionID, let text = action.text,
+                  store.list().contains(where: { $0.enabled && $0.manifest.id == extensionID && $0.manifest.permissions.fanbar?.contains("manage") == true }) else { return }
+            changingFanBar = true; footer.stringValue = "正在处理 FanBar 散热设置…"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.changingFanBar = false }
+                do {
+                    try await FanBarControl.shared.perform(action.type, text: text)
+                    self.footer.stringValue = "FanBar 设置已更新"
+                    self.updateQuery(immediate: true)
+                } catch { self.footer.stringValue = error.localizedDescription }
+                if self.panel.isVisible { self.panel.makeKeyAndOrderFront(nil); self.focusSearch() }
             }
         case "view.detail":
             guard item.extensionID != nil else { return }

@@ -76,6 +76,19 @@ final class CapabilityBroker: NSObject, BrokerProtocol, @unchecked Sendable {
             }
             return
         }
+        if method == "fanbar.status" {
+            guard extensionInfo.manifest.permissions.fanbar?.contains("read") == true, input.isEmpty else { reply(jsonString(["error": "扩展没有读取 FanBar 状态的权限或参数无效。"])); return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                Task {
+                    do {
+                        let status = try await FanBarControl.shared.status()
+                        reply(jsonString(["value": try JSONSerialization.jsonObject(with: JSONEncoder().encode(status))]))
+                    }
+                    catch { reply(jsonString(["error": error.localizedDescription])) }
+                }
+            }
+            return
+        }
         if method == "catalog.list" {
             guard extensionInfo.manifest.permissions.catalog?.contains("read") == true else { reply(jsonString(["error": "扩展没有读取插件目录的权限。"])); return }
             lock.lock(); catalogRequestCount += 1; let allowed = catalogRequestCount <= 2; lock.unlock()
@@ -252,6 +265,12 @@ final class RuntimeClient {
                     switch action.type {
                     case "power.enable", "power.restore": return info.manifest.permissions.power?.contains("manage") == true && action.text == ""
                     case "power.refresh": return info.manifest.permissions.power?.contains("read") == true && action.text == ""
+                    case "fanbar.restore", "fanbar.preset", "fanbar.rpm", "fanbar.eighty":
+                        guard info.manifest.permissions.fanbar?.contains("manage") == true, let text = action.text else { return false }
+                        if action.type == "fanbar.restore" || action.type == "fanbar.eighty" { return text.isEmpty }
+                        if action.type == "fanbar.preset" { return Int(text).map { (0...3).contains($0) } == true }
+                        return Int(text).map { (0...100_000).contains($0) } == true
+                    case "fanbar.refresh": return info.manifest.permissions.fanbar?.contains("read") == true && action.text == ""
                     case "file.open", "file.reveal": return info.manifest.permissions.files?.contains("open") == true && fileURL != nil && action.text == safe.fileID
                     case "view.detail": return item.preview?.text != nil || item.detail != nil
                     case "catalog.install": return info.manifest.permissions.catalog?.contains("install") == true && safe.catalogID != nil && action.text == safe.catalogID

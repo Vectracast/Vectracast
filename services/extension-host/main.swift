@@ -72,6 +72,7 @@ final class Execution: NSObject, RuntimeProtocol {
                 const ctx={query:input.query,rawInput:input.rawInput,filter:input.filter||"",preferences:input.preferences||{},search:input.search||{sensitivity:'medium'},
                   secrets:{get:name=>__rpc('secrets.get',{name})},
                   power:{status:()=>__rpc('power.status',{})},
+                  fanbar:{status:()=>__rpc('fanbar.status',{})},
                   catalog:{list:()=>__rpc('catalog.list',{})},
                   storage:{flags:()=>__rpc('storage.flags',{})},
                   files:{search:(query,kind="all")=>__rpc('files.search',{query,kind})},
